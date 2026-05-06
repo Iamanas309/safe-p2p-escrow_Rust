@@ -1,0 +1,22 @@
+.anchor
+.DS_Store
+target
+**/*.rs.bk
+node_modules
+test-ledger
+.yarn
+.surfpool
+
+# env files — never commit secrets
+.env
+.env.local
+.env*.local
+app/.env
+app/.env.local
+app/.env*.local
+
+# reference solidity contracts — not part of build
+reference/
+
+# scratch files
+write_file.py.save

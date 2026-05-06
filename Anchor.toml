@@ -1,0 +1,21 @@
+[toolchain]
+package_manager = "yarn"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+safe_p2p_escrow = "CtKjEzbZLj2FUWz1Rt15q4A5EW38NPCpoTXX9bcXUjgt"
+
+[programs.devnet]
+safe_p2p_escrow = "CtKjEzbZLj2FUWz1Rt15q4A5EW38NPCpoTXX9bcXUjgt"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "cargo test"
+
+[hooks]
