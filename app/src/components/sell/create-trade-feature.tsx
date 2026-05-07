@@ -357,7 +357,16 @@ export function CreateTradeFeature() {
               {faucetState === 'done' ? (
                 <span style={{ color: '#10b981', fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap' }}>✓ 1000 USDT sent</span>
               ) : faucetState === 'error' ? (
-                <span style={{ color: '#ef4444', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Failed — retry</span>
+                <button
+                  onClick={() => setFaucetState('idle')}
+                  style={{
+                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                    color: '#f87171', borderRadius: 8, padding: '7px 14px',
+                    fontSize: '0.75rem', cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  Failed — Retry
+                </button>
               ) : (
                 <button
                   onClick={handleFaucet}
