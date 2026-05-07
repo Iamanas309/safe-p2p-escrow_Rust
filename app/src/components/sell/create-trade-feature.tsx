@@ -125,6 +125,23 @@ export function CreateTradeFeature() {
   const [tradeId, setTradeId]       = useState(0n)
   const [txSig, setTxSig]           = useState('')
   const [errorMsg, setErrorMsg]     = useState('')
+  const [faucetState, setFaucetState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+
+  async function handleFaucet() {
+    if (!publicKey) return
+    setFaucetState('loading')
+    try {
+      const res = await fetch('/api/faucet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: publicKey.toBase58() }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      setFaucetState('done')
+    } catch {
+      setFaucetState('error')
+    }
+  }
 
   useEffect(() => {
     fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=pkr')
@@ -318,9 +335,46 @@ export function CreateTradeFeature() {
       <div className="defi-body" style={{ padding: '24px' }}>
         <div style={{ maxWidth: '480px', margin: '0 auto', width: '100%' }}>
 
-          <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '20px' }}>
+          <p style={{ color: '#64748b', fontSize: '0.82rem', marginBottom: '16px' }}>
             Lock USDT in on-chain escrow · collect PKR from the buyer off-chain
           </p>
+
+          {/* Devnet faucet */}
+          {publicKey && (
+            <div style={{
+              marginBottom: '20px', padding: '12px 16px', borderRadius: 10,
+              background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.18)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <div>
+                <div style={{ color: '#34d399', fontSize: '0.75rem', fontWeight: 600, marginBottom: 2 }}>
+                  Devnet Faucet
+                </div>
+                <div style={{ color: '#475569', fontSize: '0.72rem' }}>
+                  Need test USDT? Get 1,000 USDT sent to your wallet instantly.
+                </div>
+              </div>
+              {faucetState === 'done' ? (
+                <span style={{ color: '#10b981', fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap' }}>✓ 1000 USDT sent</span>
+              ) : faucetState === 'error' ? (
+                <span style={{ color: '#ef4444', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Failed — retry</span>
+              ) : (
+                <button
+                  onClick={handleFaucet}
+                  disabled={faucetState === 'loading'}
+                  style={{
+                    background: 'linear-gradient(135deg,#10b981,#059669)',
+                    color: '#fff', border: 'none', borderRadius: 8,
+                    padding: '7px 16px', fontSize: '0.78rem', fontWeight: 600,
+                    cursor: faucetState === 'loading' ? 'not-allowed' : 'pointer',
+                    whiteSpace: 'nowrap', opacity: faucetState === 'loading' ? 0.6 : 1,
+                  }}
+                >
+                  {faucetState === 'loading' ? 'Sending…' : 'Get 1000 USDT'}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Wallet guard */}
           {!publicKey && (
