@@ -126,19 +126,23 @@ export function CreateTradeFeature() {
   const [txSig, setTxSig]           = useState('')
   const [errorMsg, setErrorMsg]     = useState('')
   const [faucetState, setFaucetState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const [faucetError, setFaucetError] = useState('')
 
   async function handleFaucet() {
     if (!publicKey) return
     setFaucetState('loading')
+    setFaucetError('')
     try {
       const res = await fetch('/api/faucet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet: publicKey.toBase58() }),
       })
-      if (!res.ok) throw new Error((await res.json()).error)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? JSON.stringify(data))
       setFaucetState('done')
-    } catch {
+    } catch (e: unknown) {
+      setFaucetError(e instanceof Error ? e.message : String(e))
       setFaucetState('error')
     }
   }
@@ -357,16 +361,23 @@ export function CreateTradeFeature() {
               {faucetState === 'done' ? (
                 <span style={{ color: '#10b981', fontSize: '0.78rem', fontWeight: 600, whiteSpace: 'nowrap' }}>✓ 1000 USDT sent</span>
               ) : faucetState === 'error' ? (
-                <button
-                  onClick={() => setFaucetState('idle')}
-                  style={{
-                    background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
-                    color: '#f87171', borderRadius: 8, padding: '7px 14px',
-                    fontSize: '0.75rem', cursor: 'pointer', whiteSpace: 'nowrap',
-                  }}
-                >
-                  Failed — Retry
-                </button>
+                <div style={{ textAlign: 'right' }}>
+                  <button
+                    onClick={() => { setFaucetState('idle'); setFaucetError('') }}
+                    style={{
+                      background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                      color: '#f87171', borderRadius: 8, padding: '7px 14px',
+                      fontSize: '0.75rem', cursor: 'pointer', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Failed — Retry
+                  </button>
+                  {faucetError && (
+                    <div style={{ color: '#ef4444', fontSize: '0.68rem', marginTop: 4, maxWidth: 200, wordBreak: 'break-word' }}>
+                      {faucetError}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button
                   onClick={handleFaucet}
