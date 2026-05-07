@@ -18,12 +18,6 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { SAFE_P2P_ESCROW_PROGRAM_ID, USDT_DECIMALS, USDT_MINT } from '@/lib/constants'
 
-const GREEN     = '#00cc33'
-const GREEN_DIM = '#006622'
-const RED       = '#cc3300'
-const YELLOW    = '#ccaa00'
-const MONO      = "'Courier New', monospace"
-
 const ADMIN_PUBKEY = new PublicKey('8k31uKgoxe8Kg1dgeXLevAaj1X7ck6Y26rbXosiXBGGE')
 const NULL_PUBKEY  = '11111111111111111111111111111111'
 const TRADE_DISC   = [46, 97, 187, 111, 38, 69, 11, 236]
@@ -52,10 +46,10 @@ interface TradeData {
   tradeId: bigint
   seller: string
   buyer: string
-  amount: bigint    // micro USDT
-  rate: bigint      // PKR per USDT
-  createdAt: number // unix seconds
-  joinedAt: number  // unix seconds (0 if not joined)
+  amount: bigint
+  rate: bigint
+  createdAt: number
+  joinedAt: number
   status: TradeStatus
 }
 
@@ -118,7 +112,7 @@ async function fetchMyTrades(connection: Connection, wallet: string): Promise<Tr
     }
   }
 
-  trades.sort((a, b) => Number(b.tradeId - a.tradeId)) // newest first
+  trades.sort((a, b) => Number(b.tradeId - a.tradeId))
   return trades
 }
 
@@ -235,62 +229,40 @@ function cancelCountdown(joinedAt: number): string {
   return `${m}m ${s}s`
 }
 
-// ── Shell ─────────────────────────────────────────────────────────────────────
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="terminal-page fixed inset-0 z-50 flex flex-col overflow-auto"
-      style={{ background: '#000', fontFamily: MONO }}>
-      {children}
-      <div className="shrink-0 px-4 py-2 border-t"
-        style={{ color: GREEN_DIM, borderColor: '#0d260d', fontSize: '0.7rem', letterSpacing: '0.03em' }}>
-        {'>'} safe p2p escrow&nbsp;&nbsp;|&nbsp;&nbsp;devnet&nbsp;&nbsp;|&nbsp;&nbsp;my trades
-      </div>
-    </div>
-  )
-}
-
 // ── Status badge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: TradeStatus }) {
-  const color = {
-    Open:      GREEN,
-    Active:    YELLOW,
-    Disputed:  RED,
-    Completed: GREEN_DIM,
-    Cancelled: GREEN_DIM,
-  }[status]
+  const styles: Record<TradeStatus, React.CSSProperties> = {
+    Open:      { background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' },
+    Active:    { background: 'rgba(245,158,11,0.12)',  color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' },
+    Disputed:  { background: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)' },
+    Completed: { background: 'rgba(96,165,250,0.12)',  color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' },
+    Cancelled: { background: 'rgba(100,116,139,0.12)', color: '#64748b', border: '1px solid rgba(100,116,139,0.2)' },
+  }
   return (
-    <span style={{ color, fontSize: '0.72rem', letterSpacing: '0.1em', border: `1px solid ${color}`, padding: '1px 6px' }}>
+    <span style={{
+      ...styles[status],
+      fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.06em',
+      padding: '2px 8px', borderRadius: 6,
+    }}>
       {status.toUpperCase()}
     </span>
   )
 }
 
-// ── Action button ─────────────────────────────────────────────────────────────
+// ── Role badge ────────────────────────────────────────────────────────────────
 
-function ActionBtn({
-  label, onClick, danger = false, disabled = false,
-}: { label: string; onClick: () => void; danger?: boolean; disabled?: boolean }) {
-  const color = disabled ? GREEN_DIM : danger ? RED : GREEN
+function RoleBadge({ role }: { role: 'SELLER' | 'BUYER' }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={disabled ? '' : 'terminal-menu-btn'}
-      style={{
-        border: `1px solid ${color}`,
-        color,
-        background: 'transparent',
-        fontFamily: MONO,
-        fontSize: '0.72rem',
-        letterSpacing: '0.08em',
-        padding: '5px 12px',
-        cursor: disabled ? 'default' : 'pointer',
-      }}
-    >
-      {label}
-    </button>
+    <span style={{
+      fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em',
+      padding: '2px 8px', borderRadius: 6,
+      background: role === 'SELLER' ? 'rgba(124,58,237,0.15)' : 'rgba(16,185,129,0.1)',
+      color:      role === 'SELLER' ? '#a78bfa'               : '#34d399',
+      border:     role === 'SELLER' ? '1px solid rgba(124,58,237,0.3)' : '1px solid rgba(16,185,129,0.25)',
+    }}>
+      {role}
+    </span>
   )
 }
 
@@ -300,15 +272,14 @@ export function MyTradesFeature() {
   const { connection }                 = useConnection()
   const { publicKey, sendTransaction } = useWallet()
 
-  const [trades, setTrades]       = useState<TradeData[]>([])
-  const [loading, setLoading]     = useState(false)
-  const [actingOn, setActingOn]   = useState<string | null>(null)
-  const [errorMsg, setErrorMsg]   = useState('')
+  const [trades, setTrades]         = useState<TradeData[]>([])
+  const [loading, setLoading]       = useState(false)
+  const [actingOn, setActingOn]     = useState<string | null>(null)
+  const [errorMsg, setErrorMsg]     = useState('')
   const [successMsg, setSuccessMsg] = useState('')
-  const [txSig, setTxSig]         = useState('')
-  const [, setTick]               = useState(0)
+  const [txSig, setTxSig]           = useState('')
+  const [, setTick]                 = useState(0)
 
-  // Re-render every 10s to update countdowns
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 10_000)
     return () => clearInterval(id)
@@ -330,11 +301,11 @@ export function MyTradesFeature() {
 
   useEffect(() => { load() }, [load])
 
-  // ── Action: Confirm Payment
   async function handleConfirm(t: TradeData) {
     if (!publicKey) return
     setActingOn(t.pda)
     setErrorMsg('')
+    setSuccessMsg('')
     try {
       const [tradeAccount] = tradePDA(t.tradeId)
       const [vault]        = vaultPDA(t.tradeId)
@@ -342,18 +313,16 @@ export function MyTradesFeature() {
       const buyerPk        = new PublicKey(t.buyer)
       const buyerAta       = getAssociatedTokenAddressSync(usdtMint, buyerPk)
 
-      // Ensure buyer ATA exists — prepend create if needed
       const tx = new Transaction()
       const buyerAtaInfo = await connection.getAccountInfo(buyerAta)
       if (!buyerAtaInfo) {
         tx.add(createAssociatedTokenAccountInstruction(publicKey, buyerAta, buyerPk, usdtMint))
       }
-
       tx.add(buildConfirmPaymentIx(t.tradeId, tradeAccount, vault, publicKey, buyerAta))
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
-      setSuccessMsg('PAYMENT CONFIRMED — USDT RELEASED TO BUYER')
+      setSuccessMsg('Payment confirmed — USDT released to buyer')
       await load()
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e)
@@ -363,11 +332,11 @@ export function MyTradesFeature() {
     }
   }
 
-  // ── Action: Cancel Trade
   async function handleCancel(t: TradeData) {
     if (!publicKey) return
     setActingOn(t.pda)
     setErrorMsg('')
+    setSuccessMsg('')
     try {
       const [escrowState]  = escrowStatePDA()
       const [tradeAccount] = tradePDA(t.tradeId)
@@ -378,12 +347,10 @@ export function MyTradesFeature() {
       const adminAta       = getAssociatedTokenAddressSync(usdtMint, ADMIN_PUBKEY)
 
       const tx = new Transaction()
-      // Ensure admin ATA exists (needed even if admin receives 0 in open-cancel)
       const adminAtaInfo = await connection.getAccountInfo(adminAta)
       if (!adminAtaInfo) {
         tx.add(createAssociatedTokenAccountInstruction(publicKey, adminAta, ADMIN_PUBKEY, usdtMint))
       }
-
       tx.add(buildCancelTradeIx(
         t.tradeId, escrowState, tradeAccount, vault,
         publicKey, sellerAta, adminAta,
@@ -391,7 +358,7 @@ export function MyTradesFeature() {
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
-      setSuccessMsg('TRADE CANCELLED — USDT RETURNED TO SELLER')
+      setSuccessMsg('Trade cancelled — USDT returned to seller')
       await load()
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e)
@@ -401,23 +368,23 @@ export function MyTradesFeature() {
     }
   }
 
-  // ── Action: Raise Dispute
   async function handleRaiseDispute(t: TradeData) {
     if (!publicKey) return
     setActingOn(t.pda)
     setErrorMsg('')
+    setSuccessMsg('')
     try {
-      const [escrowState]   = escrowStatePDA()
-      const [tradeAccount]  = tradePDA(t.tradeId)
-      const disputeCounter  = await fetchDisputeCounter(connection)
+      const [escrowState]    = escrowStatePDA()
+      const [tradeAccount]   = tradePDA(t.tradeId)
+      const disputeCounter   = await fetchDisputeCounter(connection)
       const [disputeAccount] = disputePDA(disputeCounter)
 
-      const tx  = new Transaction()
+      const tx = new Transaction()
       tx.add(buildRaiseDisputeIx(t.tradeId, escrowState, tradeAccount, disputeAccount, publicKey))
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
-      setSuccessMsg('DISPUTE RAISED — ARBITRATORS WILL VOTE')
+      setSuccessMsg('Dispute raised — arbitrators will vote')
       await load()
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e)
@@ -432,7 +399,7 @@ export function MyTradesFeature() {
     const wallet     = publicKey?.toBase58() ?? ''
     const isSeller   = t.seller === wallet
     const isBuyer    = t.buyer  === wallet
-    const role       = isSeller ? 'SELLER' : isBuyer ? 'BUYER' : '—'
+    const role       = isSeller ? 'SELLER' : 'BUYER'
     const amountUsdt = formatUsdt(t.amount)
     const buyerPkr   = (Number(t.amount) / 10 ** USDT_DECIMALS * Number(t.rate)).toLocaleString()
     const isActing   = actingOn === t.pda
@@ -446,59 +413,54 @@ export function MyTradesFeature() {
       : ''
 
     return (
-      <div style={{
-        border: `1px solid ${GREEN_DIM}`,
-        padding: '14px 16px',
-        marginBottom: '12px',
+      <div className="glass-card-sm" style={{
+        padding: '16px', marginBottom: '12px',
         opacity: isActing ? 0.6 : 1,
+        transition: 'opacity 0.2s',
       }}>
         {/* Top row */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-          <Link href={`/trade/${t.tradeId.toString()}`} style={{ textDecoration: 'none' }}>
-            <span
-              className="terminal-menu-btn"
-              style={{
-                color: '#00ff41', fontSize: '0.75rem', letterSpacing: '0.08em',
-                border: '1px solid #006622', padding: '3px 8px', display: 'inline-block',
-              }}
-            >
-              [ #{t.tradeId.toString().padStart(7, '0')} → ]
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              fontSize: '0.72rem', fontFamily: 'monospace', color: '#64748b',
+            }}>
+              #{String(t.tradeId).padStart(5, '0')}
             </span>
-          </Link>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.1em' }}>{role}</span>
-            <StatusBadge status={t.status} />
+            <RoleBadge role={role as 'SELLER' | 'BUYER'} />
+          </div>
+          <StatusBadge status={t.status} />
+        </div>
+
+        {/* Amount */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+            {amountUsdt} <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>USDT</span>
+          </div>
+          <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: 3 }}>
+            ≈ {buyerPkr} PKR
           </div>
         </div>
 
         {/* Details */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.78rem', letterSpacing: '0.03em' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: GREEN }}>
-            <span>AMOUNT</span>
-            <span>{amountUsdt} USDT</span>
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 10, marginBottom: 12 }}>
+          <div className="defi-row">
+            <span style={{ color: '#64748b' }}>Rate</span>
+            <span style={{ color: '#cbd5e1' }}>{t.rate.toString()} PKR/USDT</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: GREEN }}>
-            <span>RATE</span>
-            <span>{t.rate.toString()} PKR/USDT</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: GREEN_DIM }}>
-            <span>BUYER PAYS</span>
-            <span>{buyerPkr} PKR</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', color: GREEN_DIM, marginTop: '4px' }}>
-            <span>CREATED</span>
-            <span>{timeAgo(t.createdAt)}</span>
+          <div className="defi-row">
+            <span style={{ color: '#64748b' }}>Created</span>
+            <span style={{ color: '#94a3b8' }}>{timeAgo(t.createdAt)}</span>
           </div>
           {t.joinedAt > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: GREEN_DIM }}>
-              <span>JOINED</span>
-              <span>{timeAgo(t.joinedAt)}</span>
+            <div className="defi-row">
+              <span style={{ color: '#64748b' }}>Joined</span>
+              <span style={{ color: '#94a3b8' }}>{timeAgo(t.joinedAt)}</span>
             </div>
           )}
           {t.buyer !== NULL_PUBKEY && t.status !== 'Open' && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: GREEN_DIM }}>
-              <span>BUYER</span>
-              <span style={{ fontSize: '0.65rem' }}>
+            <div className="defi-row">
+              <span style={{ color: '#64748b' }}>Buyer</span>
+              <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '0.75rem' }}>
                 {t.buyer.slice(0, 6)}…{t.buyer.slice(-6)}
               </span>
             </div>
@@ -507,121 +469,193 @@ export function MyTradesFeature() {
 
         {/* Actions */}
         {isActing ? (
-          <div style={{ marginTop: '12px', color: YELLOW, fontSize: '0.75rem', letterSpacing: '0.05em' }}>
-            {'>'} processing…<span className="terminal-cursor"> _</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f59e0b', fontSize: '0.82rem' }}>
+            <span style={{
+              width: 14, height: 14, borderRadius: '50%',
+              border: '2px solid rgba(245,158,11,0.3)', borderTopColor: '#f59e0b',
+              display: 'inline-block', animation: 'spin 0.8s linear infinite',
+            }} />
+            Processing…
           </div>
         ) : (
-          <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {/* Confirm Payment — seller only, active */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             {t.status === 'Active' && isSeller && (
-              <ActionBtn label="[ CONFIRM PAYMENT ]" onClick={() => handleConfirm(t)} />
+              <button
+                className="btn-gradient"
+                onClick={() => handleConfirm(t)}
+                style={{ fontSize: '0.8rem', padding: '7px 14px', border: 'none', cursor: 'pointer' }}
+              >
+                Confirm Payment
+              </button>
             )}
 
-            {/* Cancel */}
             {canCancel && (
-              <ActionBtn label="[ CANCEL ]" onClick={() => handleCancel(t)} danger />
+              <button
+                onClick={() => handleCancel(t)}
+                style={{
+                  fontSize: '0.8rem', padding: '6px 14px', borderRadius: 8, cursor: 'pointer',
+                  background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                  color: '#ef4444', fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
             )}
 
-            {/* Cancel countdown for active trades */}
             {t.status === 'Active' && !canCancelActive(t.joinedAt) && countdown && (isSeller || isBuyer) && (
-              <span style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.05em', alignSelf: 'center' }}>
-                cancel in {countdown}
+              <span style={{ fontSize: '0.72rem', color: '#475569' }}>
+                cancel unlocks in {countdown}
               </span>
             )}
 
-            {/* Raise Dispute — buyer only, active */}
             {t.status === 'Active' && isBuyer && (
-              <ActionBtn label="[ RAISE DISPUTE ]" onClick={() => handleRaiseDispute(t)} danger />
+              <button
+                onClick={() => handleRaiseDispute(t)}
+                style={{
+                  fontSize: '0.8rem', padding: '6px 14px', borderRadius: 8, cursor: 'pointer',
+                  background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+                  color: '#f87171', fontWeight: 600,
+                }}
+              >
+                Raise Dispute
+              </button>
             )}
           </div>
         )}
+
+        {/* View details */}
+        <Link href={`/trade/${t.tradeId.toString()}`} style={{ textDecoration: 'none', display: 'block', marginTop: 14 }}>
+          <button style={{
+            width: '100%', padding: '9px',
+            background: 'rgba(139,92,246,0.08)',
+            border: '1px solid rgba(139,92,246,0.25)',
+            borderRadius: 9, cursor: 'pointer',
+            color: '#a78bfa', fontSize: '0.82rem', fontWeight: 600,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}>
+            View Full Trade Details
+            <span style={{ fontSize: '0.9rem' }}>→</span>
+          </button>
+        </Link>
       </div>
     )
   }
 
   // ── Render
   return (
-    <Shell>
-      {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 shrink-0">
-        <Link href="/" style={{ color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.08em', textDecoration: 'none' }}>
-          {'<'} BACK
-        </Link>
+    <div className="defi-page">
+
+      {/* Top bar */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 24px', flexShrink: 0, zIndex: 2,
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Link href="/" style={{
+            color: '#475569', fontSize: '0.82rem', textDecoration: 'none',
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}>
+            ← Back
+          </Link>
+          <span style={{ color: 'rgba(255,255,255,0.1)', fontSize: '0.9rem' }}>|</span>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.88rem' }}>My Trades</span>
+        </div>
         <WalletButton />
       </div>
 
       {/* Body */}
-      <div className="flex-1 px-4 pb-8" style={{ maxWidth: '560px', margin: '0 auto', width: '100%' }}>
-        {/* Title */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: GREEN, fontSize: 'clamp(1rem, 3vw, 1.2rem)', letterSpacing: '0.15em' }}>
-            {'>'} MY TRADES
-          </div>
-          <div style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.05em', marginTop: '4px' }}>
-            trades where you are seller or buyer
-          </div>
-        </div>
+      <div className="defi-body">
+        <div style={{ maxWidth: 560, margin: '0 auto', padding: '28px 20px 60px', width: '100%' }}>
 
-        {/* Wallet guard */}
-        {!publicKey ? (
-          <div style={{ border: `1px solid ${GREEN_DIM}`, padding: '14px 16px', color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.05em' }}>
-            {'>'} CONNECT WALLET TO SEE YOUR TRADES<span className="terminal-cursor"> _</span>
-          </div>
-        ) : loading ? (
-          <div style={{ color: GREEN, fontSize: '0.85rem', letterSpacing: '0.06em' }}>
-            {'>'} FETCHING TRADES<span className="terminal-cursor"> _</span>
-          </div>
-        ) : trades.length === 0 ? (
-          <div style={{ color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.05em', border: `1px solid ${GREEN_DIM}`, padding: '16px' }}>
-            {'>'} NO TRADES FOUND<br />
-            <span style={{ fontSize: '0.68rem' }}>
-              go to <Link href="/sell" style={{ color: GREEN, textDecoration: 'underline' }}>SELL</Link> to create your first trade
-            </span>
-          </div>
-        ) : (
-          <>
-            {/* Count + refresh */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <span style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.05em' }}>
-                {trades.length} trade{trades.length !== 1 ? 's' : ''} found
-              </span>
-              <button
-                onClick={load}
-                className="terminal-menu-btn"
-                style={{ border: `1px solid ${GREEN_DIM}`, color: GREEN_DIM, background: 'transparent', fontFamily: MONO, fontSize: '0.68rem', letterSpacing: '0.08em', padding: '3px 10px' }}
-              >
-                [ REFRESH ]
-              </button>
+          {/* Wallet guard */}
+          {!publicKey ? (
+            <div className="glass-card" style={{ padding: '32px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', marginBottom: 12 }}>🔗</div>
+              <div style={{ color: '#94a3b8', fontSize: '0.9rem' }}>
+                Connect your wallet to see your trades
+              </div>
             </div>
-
-            {/* Success */}
-            {successMsg && (
-              <div style={{ border: `1px solid ${GREEN}`, padding: '10px 12px', color: GREEN, fontSize: '0.75rem', marginBottom: '12px', letterSpacing: '0.02em' }}>
-                {'>'} {successMsg}
-                {txSig && (
-                  <a
-                    href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{ display: 'block', marginTop: '6px', color: GREEN_DIM, fontSize: '0.65rem', textDecoration: 'underline' }}
-                  >
-                    {'>'} view on Solana Explorer ↗
-                  </a>
-                )}
+          ) : loading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', padding: '32px 0' }}>
+              <span style={{
+                width: 16, height: 16, borderRadius: '50%',
+                border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#a855f7',
+                display: 'inline-block', animation: 'spin 0.8s linear infinite',
+              }} />
+              Fetching trades…
+            </div>
+          ) : trades.length === 0 ? (
+            <div className="glass-card" style={{ padding: '40px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>📭</div>
+              <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: 16 }}>No trades yet</div>
+              <Link href="/sell" style={{ textDecoration: 'none' }}>
+                <button className="btn-gradient" style={{
+                  fontSize: '0.85rem', padding: '9px 20px', border: 'none', cursor: 'pointer',
+                }}>
+                  Create a Trade
+                </button>
+              </Link>
+            </div>
+          ) : (
+            <>
+              {/* Count + refresh */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <span style={{ color: '#475569', fontSize: '0.8rem' }}>
+                  {trades.length} trade{trades.length !== 1 ? 's' : ''}
+                </span>
+                <button
+                  onClick={load}
+                  style={{
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                    color: '#64748b', fontSize: '0.75rem', padding: '5px 12px',
+                    borderRadius: 8, cursor: 'pointer',
+                  }}
+                >
+                  Refresh ↻
+                </button>
               </div>
-            )}
 
-            {/* Error */}
-            {errorMsg && (
-              <div style={{ border: `1px solid ${RED}`, padding: '10px 12px', color: RED, fontSize: '0.75rem', marginBottom: '12px', wordBreak: 'break-word', letterSpacing: '0.02em' }}>
-                {errorMsg}
-              </div>
-            )}
+              {/* Success */}
+              {successMsg && (
+                <div className="defi-alert-success" style={{ padding: '12px 16px', marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>✓ {successMsg}</div>
+                  {txSig && (
+                    <a
+                      href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ display: 'block', marginTop: 6, fontSize: '0.72rem', color: '#34d399', textDecoration: 'underline' }}
+                    >
+                      View on Solana Explorer ↗
+                    </a>
+                  )}
+                </div>
+              )}
 
-            {/* Trade cards */}
-            {trades.map(t => <TradeCard key={t.pda} t={t} />)}
-          </>
-        )}
+              {/* Error */}
+              {errorMsg && (
+                <div className="defi-alert-error" style={{ padding: '12px 16px', marginBottom: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 4 }}>⚠ Transaction failed</div>
+                  <div style={{ fontSize: '0.75rem', wordBreak: 'break-word', opacity: 0.85 }}>{errorMsg}</div>
+                </div>
+              )}
+
+              {/* Trade cards */}
+              {trades.map(t => <TradeCard key={t.pda} t={t} />)}
+            </>
+          )}
+        </div>
       </div>
-    </Shell>
+
+      {/* Status bar */}
+      <div style={{
+        flexShrink: 0, padding: '9px 24px',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ color: '#475569', fontSize: '0.68rem', fontFamily: 'monospace' }}>SafeP2P</span>
+        <span style={{ color: '#475569', fontSize: '0.68rem' }}>devnet · my trades</span>
+      </div>
+    </div>
   )
 }

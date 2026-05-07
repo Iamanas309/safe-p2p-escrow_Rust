@@ -6,267 +6,327 @@ import { useConnection } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { SAFE_P2P_ESCROW_PROGRAM_ID } from '@/lib/constants'
 
-const PROGRAM_ID = SAFE_P2P_ESCROW_PROGRAM_ID.toBase58()
-const PROGRAM_SHORT = `${PROGRAM_ID.slice(0, 4)}...${PROGRAM_ID.slice(-4)}`
-const GREEN = '#00cc33'
-const GREEN_DIM = '#006622'
-const MONO = "'Courier New', monospace"
+const PROGRAM_ID    = SAFE_P2P_ESCROW_PROGRAM_ID.toBase58()
+const PROGRAM_SHORT = `${PROGRAM_ID.slice(0, 4)}…${PROGRAM_ID.slice(-4)}`
 
-const MENU = [
-  { label: 'BUY USDT', href: '/buy' },
-  { label: 'SELL USDT', href: '/sell' },
-  { label: 'MY TRADES', href: '/my-trades' },
-  { label: 'BECOME ARBITRATOR', href: '/become-arbitrator' },
-  { label: 'DISPUTE PANEL', href: '/arbitrate' },
-  { label: 'PROTOCOL', href: '/protocol' },
-]
-
-// 5-wide × 7-tall dot-matrix pixel maps (1 = lit, 0 = dim)
-const DOT: Record<string, number[][]> = {
-  S: [
-    [0,1,1,1,0],
-    [1,0,0,0,1],
-    [1,0,0,0,0],
-    [0,1,1,1,0],
-    [0,0,0,0,1],
-    [1,0,0,0,1],
-    [0,1,1,1,0],
-  ],
-  A: [
-    [0,1,1,1,0],
-    [1,0,0,0,1],
-    [1,0,0,0,1],
-    [1,1,1,1,1],
-    [1,0,0,0,1],
-    [1,0,0,0,1],
-    [1,0,0,0,1],
-  ],
-  F: [
-    [1,1,1,1,1],
-    [1,0,0,0,0],
-    [1,0,0,0,0],
-    [1,1,1,1,0],
-    [1,0,0,0,0],
-    [1,0,0,0,0],
-    [1,0,0,0,0],
-  ],
-  E: [
-    [1,1,1,1,1],
-    [1,0,0,0,0],
-    [1,0,0,0,0],
-    [1,1,1,0,0],
-    [1,0,0,0,0],
-    [1,0,0,0,0],
-    [1,1,1,1,1],
-  ],
+interface MenuItemDef {
+  label: string
+  href: string
+  icon: string
+  hint: string
+  hintColor: string
+  iconBg: string
+  iconBorder: string
+  iconColor: string
+  glowColor: string
 }
 
-function PixelChar({ char, px, gap }: { char: string; px: number; gap: number }) {
-  const rows = DOT[char]
-  if (!rows) return null
+const MENU: MenuItemDef[] = [
+  {
+    label: 'Buy USDT', href: '/buy', icon: '↓',
+    hint: '+ receive USDT', hintColor: '#10b981',
+    iconBg: 'rgba(16,185,129,0.12)', iconBorder: 'rgba(16,185,129,0.3)',
+    iconColor: '#34d399', glowColor: 'rgba(16,185,129,0.35)',
+  },
+  {
+    label: 'Sell USDT', href: '/sell', icon: '↑',
+    hint: 'lock & earn PKR', hintColor: '#a78bfa',
+    iconBg: 'rgba(124,58,237,0.15)', iconBorder: 'rgba(124,58,237,0.35)',
+    iconColor: '#a78bfa', glowColor: 'rgba(124,58,237,0.35)',
+  },
+  {
+    label: 'My Trades', href: '/my-trades', icon: '◈',
+    hint: 'track activity', hintColor: '#60a5fa',
+    iconBg: 'rgba(37,99,235,0.12)', iconBorder: 'rgba(37,99,235,0.3)',
+    iconColor: '#60a5fa', glowColor: 'rgba(37,99,235,0.35)',
+  },
+  {
+    label: 'Become Arbitrator', href: '/become-arbitrator', icon: '⬡',
+    hint: '50 USDT stake', hintColor: '#f59e0b',
+    iconBg: 'rgba(245,158,11,0.12)', iconBorder: 'rgba(245,158,11,0.3)',
+    iconColor: '#fbbf24', glowColor: 'rgba(245,158,11,0.35)',
+  },
+  {
+    label: 'Dispute Panel', href: '/arbitrate', icon: '⚖',
+    hint: '2/3 vote decides', hintColor: '#ef4444',
+    iconBg: 'rgba(239,68,68,0.12)', iconBorder: 'rgba(239,68,68,0.3)',
+    iconColor: '#f87171', glowColor: 'rgba(239,68,68,0.35)',
+  },
+  {
+    label: 'Protocol', href: '/protocol', icon: '◎',
+    hint: '0.5% fee · trustless', hintColor: '#94a3b8',
+    iconBg: 'rgba(255,255,255,0.06)', iconBorder: 'rgba(255,255,255,0.15)',
+    iconColor: '#94a3b8', glowColor: 'rgba(255,255,255,0.15)',
+  },
+]
+
+// ── Escrow flow diagram ───────────────────────────────────────────────────────
+
+function FlowNode({
+  emoji, title, sub, borderColor, bgColor, glowColor,
+}: {
+  emoji: string; title: string; sub: string
+  borderColor: string; bgColor: string; glowColor: string
+}) {
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(5, ${px}px)`,
-        gap: `${gap}px`,
-        flexShrink: 0,
-      }}
-    >
-      {rows.flat().map((lit, i) => (
-        <div
-          key={i}
-          style={{
-            width: px,
-            height: px,
-            background: lit ? GREEN : 'rgba(0, 80, 20, 0.18)',
-            boxShadow: lit ? `0 0 4px ${GREEN}` : 'none',
-            borderRadius: '1px',
-          }}
-        />
-      ))}
+    <div style={{
+      background: bgColor,
+      border: `1px solid ${borderColor}`,
+      borderRadius: 12,
+      padding: '10px 10px 8px',
+      textAlign: 'center',
+      minWidth: 72,
+      flexShrink: 0,
+      boxShadow: `0 0 18px ${glowColor}`,
+    }}>
+      <div style={{ fontSize: '1.15rem', lineHeight: 1, marginBottom: 5 }}>{emoji}</div>
+      <div style={{ color: '#fff', fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em' }}>{title}</div>
+      <div style={{ color: '#475569', fontSize: '0.57rem', marginTop: 2 }}>{sub}</div>
     </div>
   )
 }
 
-function BlockCursor({ px, charH }: { px: number; charH: number }) {
+function FlowArrow({ label, dotDelay, dotColor }: { label: string; dotDelay: string; dotColor: string }) {
   return (
-    <div
-      className="terminal-cursor"
-      style={{
-        width: px + 2,
-        height: charH,
-        background: GREEN,
-        boxShadow: `0 0 8px ${GREEN}, 0 0 16px rgba(0,204,51,0.4)`,
-        borderRadius: '1px',
-        flexShrink: 0,
-      }}
-    />
+    <div style={{ flex: 1, position: 'relative', height: 44, minWidth: 32 }}>
+      <div style={{
+        position: 'absolute', top: '50%', left: 4, right: 4,
+        height: 1,
+        background: 'linear-gradient(90deg, rgba(168,85,247,0.25), rgba(59,130,246,0.25))',
+      }} />
+      <div
+        className="flow-dot"
+        style={{ animationDelay: dotDelay, background: dotColor }}
+      />
+      <div style={{
+        position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)',
+        color: '#334155', fontSize: '0.55rem', whiteSpace: 'nowrap', letterSpacing: '0.04em',
+      }}>{label}</div>
+      <div style={{
+        position: 'absolute', top: '50%', right: 2, transform: 'translateY(-50%)',
+        color: 'rgba(168,85,247,0.5)', fontSize: '0.7rem', lineHeight: 1,
+      }}>›</div>
+    </div>
   )
 }
 
-const SAFE_CHARS = ['S', 'A', 'F', 'E']
-const P2P_CHARS  = ['P', '2', 'P']
-const CHAR_MS    = 220   // ms per character
+function FlowDiagram() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center',
+      width: '100%', maxWidth: '420px',
+      marginBottom: '36px', padding: '0 4px',
+    }}>
+      <FlowNode
+        emoji="👤" title="SELLER" sub="locks USDT"
+        bgColor="rgba(255,255,255,0.03)"
+        borderColor="rgba(255,255,255,0.09)"
+        glowColor="transparent"
+      />
+      <FlowArrow label="USDT" dotDelay="0s" dotColor="linear-gradient(90deg,#a855f7,#3b82f6)" />
+      <FlowNode
+        emoji="🔒" title="VAULT" sub="on-chain"
+        bgColor="rgba(124,58,237,0.1)"
+        borderColor="rgba(124,58,237,0.35)"
+        glowColor="rgba(124,58,237,0.18)"
+      />
+      <FlowArrow label="USDT" dotDelay="1.1s" dotColor="linear-gradient(90deg,#3b82f6,#10b981)" />
+      <FlowNode
+        emoji="💸" title="BUYER" sub="gets USDT"
+        bgColor="rgba(16,185,129,0.06)"
+        borderColor="rgba(16,185,129,0.22)"
+        glowColor="rgba(16,185,129,0.12)"
+      />
+    </div>
+  )
+}
+
+// ── Menu item with per-item hover effect ──────────────────────────────────────
+
+function MenuItem({ item }: { item: MenuItemDef }) {
+  const [hov, setHov] = useState(false)
+  return (
+    <Link href={item.href} style={{ textDecoration: 'none' }}>
+      <div
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          padding: '11px 14px', borderRadius: '10px', cursor: 'pointer',
+          background: hov ? 'rgba(255,255,255,0.06)' : 'transparent',
+          transition: 'background 0.15s',
+        }}
+      >
+        {/* Icon box */}
+        <span style={{
+          width: 34, height: 34, borderRadius: 9, flexShrink: 0,
+          background: hov ? item.iconBg : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${hov ? item.iconBorder : 'rgba(255,255,255,0.08)'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: '0.9rem',
+          color: hov ? item.iconColor : '#64748b',
+          transition: 'all 0.18s',
+          boxShadow: hov ? `0 0 14px ${item.glowColor}` : 'none',
+          transform: hov ? 'scale(1.12)' : 'scale(1)',
+        }}>
+          {item.icon}
+        </span>
+
+        {/* Label */}
+        <span style={{
+          fontSize: '0.88rem', fontWeight: 500, flex: 1,
+          color: hov ? '#fff' : '#cbd5e1',
+          transition: 'color 0.15s',
+        }}>
+          {item.label}
+        </span>
+
+        {/* Hint — slides in on hover */}
+        <span style={{
+          fontSize: '0.7rem', fontWeight: 500, color: item.hintColor,
+          opacity: hov ? 1 : 0,
+          transform: hov ? 'translateX(0)' : 'translateX(10px)',
+          transition: 'opacity 0.2s, transform 0.2s',
+          whiteSpace: 'nowrap',
+        }}>
+          {item.hint}
+        </span>
+
+        {/* Arrow */}
+        <span style={{
+          color: hov ? '#fff' : '#334155',
+          fontSize: '0.78rem',
+          transition: 'all 0.18s',
+          transform: hov ? 'translateX(3px)' : 'translateX(0)',
+          flexShrink: 0,
+        }}>→</span>
+      </div>
+    </Link>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function TerminalLanding() {
   const { connection } = useConnection()
   const [slot, setSlot]       = useState<number | null>(null)
-  const [started, setStarted] = useState(false)
-  const [safeN, setSafeN]     = useState(0)
-  const [p2pN, setP2pN]       = useState(0)
+  const [visible, setVisible] = useState(false)
 
-  // Responsive pixel art sizing
-  const [dotPx, setDotPx]   = useState(10)
-  const [dotGap, setDotGap] = useState(3)
-  const [charGap, setCharGap] = useState(14)
   useEffect(() => {
-    const update = () => {
-      const w = window.innerWidth
-      if (w < 400)      { setDotPx(7);  setDotGap(2); setCharGap(8)  }
-      else if (w < 640) { setDotPx(8);  setDotGap(2); setCharGap(10) }
-      else              { setDotPx(10); setDotGap(3); setCharGap(14) }
-    }
-    update()
-    window.addEventListener('resize', update)
-    return () => window.removeEventListener('resize', update)
-  }, [])
-  const CHAR_H = 7 * dotPx + 6 * dotGap
-
-  // Live devnet slot
-  useEffect(() => {
-    const fetch = async () => { try { setSlot(await connection.getSlot()) } catch {} }
-    fetch()
-    const id = setInterval(fetch, 5000)
+    const go = async () => { try { setSlot(await connection.getSlot()) } catch {} }
+    go()
+    const id = setInterval(go, 5000)
     return () => clearInterval(id)
   }, [connection])
 
-  // Initial pause before typing starts (cursor blinks alone)
   useEffect(() => {
-    const t = setTimeout(() => setStarted(true), 700)
+    const t = setTimeout(() => setVisible(true), 120)
     return () => clearTimeout(t)
   }, [])
 
-  // Type SAFE → pause → type P2P
-  useEffect(() => {
-    if (!started) return
-    if (safeN < SAFE_CHARS.length) {
-      const t = setTimeout(() => setSafeN(n => n + 1), CHAR_MS)
-      return () => clearTimeout(t)
-    }
-    if (p2pN < P2P_CHARS.length) {
-      // extra pause between SAFE done and first P2P char
-      const t = setTimeout(() => setP2pN(n => n + 1), p2pN === 0 ? 400 : CHAR_MS)
-      return () => clearTimeout(t)
-    }
-  }, [started, safeN, p2pN])
-
-  const safeDone = safeN === SAFE_CHARS.length
-  const p2pDone  = p2pN  === P2P_CHARS.length
-
-  // Cursor placement rules:
-  //   block cursor in SAFE row  → while typing SAFE, or during post-SAFE pause
-  //   _ cursor in P2P row       → while typing P2P (p2pN > 0 and not done)
-  //   _ cursor after tagline    → after everything is done
-  const showSafeCursor = !safeDone || p2pN === 0
-  const showP2pRow     = p2pN > 0
-  const showP2pCursor  = showP2pRow && !p2pDone
-
   return (
-    <div
-      className="terminal-page fixed inset-0 z-50 flex flex-col overflow-hidden"
-      style={{ background: '#000000', fontFamily: MONO }}
-    >
+    <div className="defi-page">
+
       {/* Top bar */}
-      <div className="flex justify-end items-center px-6 py-4 shrink-0">
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 24px', position: 'relative', zIndex: 2, flexShrink: 0,
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: 'linear-gradient(135deg, #a855f7, #3b82f6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '0.72rem', fontWeight: 800, color: '#fff',
+          }}>S</div>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.88rem', letterSpacing: '0.01em' }}>
+            SafeP2P
+          </span>
+        </div>
         <WalletButton />
       </div>
 
-      {/* Centered content — scrollable outer, my-auto inner so it centers when space allows */}
-      <div className="flex-1 flex flex-col items-center min-h-0 overflow-y-auto">
-        <div className="flex flex-col items-center gap-0 w-full my-auto py-6 px-6">
+      {/* Body */}
+      <div className="defi-body">
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', minHeight: '100%', padding: '32px 24px 56px',
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'translateY(0)' : 'translateY(16px)',
+          transition: 'opacity 0.55s ease, transform 0.55s ease',
+        }}>
 
-          {/* ── SAFE dot-matrix + block cursor ── */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: `${charGap}px` }}>
-            {SAFE_CHARS.slice(0, safeN).map((c, i) => (
-              <PixelChar key={i} char={c} px={dotPx} gap={dotGap} />
-            ))}
-            {showSafeCursor && <BlockCursor px={dotPx} charH={CHAR_H} />}
+          {/* Hero */}
+          <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+            <h1 className="gradient-text" style={{
+              fontSize: 'clamp(3rem, 13vw, 7rem)', fontWeight: 800,
+              letterSpacing: '-0.04em', lineHeight: 0.95, margin: 0,
+            }}>
+              SAFE
+            </h1>
+            <h2 style={{
+              fontSize: 'clamp(1rem, 4vw, 2.2rem)', fontWeight: 600,
+              letterSpacing: '0.26em', color: 'rgba(255,255,255,0.28)',
+              margin: '8px 0 0', textTransform: 'uppercase',
+            }}>
+              P2P Escrow
+            </h2>
           </div>
 
-          {/* ── P2P typed text ── */}
-          {showP2pRow && (
-            <div
-              style={{
-                marginTop: '18px',
-                color: GREEN,
-                fontSize: 'clamp(1.1rem, 4vw, 1.9rem)',
-                letterSpacing: '0.55em',
-                textShadow: `0 0 6px ${GREEN}`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '2px',
-              }}
-            >
-              <span>{P2P_CHARS.slice(0, p2pN).join('')}</span>
-              {showP2pCursor && (
-                <span className="terminal-cursor" style={{ color: GREEN, letterSpacing: 0 }}>_</span>
-              )}
-            </div>
-          )}
+          {/* Tagline */}
+          <p style={{
+            color: '#64748b', fontSize: 'clamp(0.78rem, 2.2vw, 0.92rem)',
+            textAlign: 'center', maxWidth: '300px',
+            lineHeight: 1.7, marginBottom: '32px',
+          }}>
+            Trustless USDT ↔ PKR on Solana.<br />
+            Escrowed on-chain. No middleman.
+          </p>
 
-          {/* ── Tagline — visible once P2P is done ── */}
-          {p2pDone && (
-            <div style={{ marginTop: '16px', color: GREEN, fontSize: 'clamp(0.7rem, 2vw, 0.85rem)' }}>
-              {'>'} trustless p2p escrow. no scams.
-              <span className="terminal-cursor" style={{ color: GREEN }}> _</span>
-            </div>
-          )}
+          {/* Flow diagram */}
+          <FlowDiagram />
 
-          {/* ── Menu buttons — visible once P2P is done ── */}
-          {p2pDone && (
-            <nav
-              className="flex flex-col items-center mt-8 gap-2 w-full"
-              style={{ maxWidth: '340px' }}
-            >
-              {MENU.map(({ label, href }) => (
-                <Link key={href} href={href} className="w-full">
-                  <button
-                    className="terminal-menu-btn w-full py-3 px-4 border text-center transition-all duration-100"
-                    style={{
-                      color: GREEN,
-                      borderColor: GREEN,
-                      background: 'transparent',
-                      fontFamily: MONO,
-                      fontSize: 'clamp(0.75rem, 2.5vw, 0.9rem)',
-                      letterSpacing: '0.12em',
-                    }}
-                  >
-                    [ {label} ]
-                  </button>
-                </Link>
-              ))}
-            </nav>
-          )}
+          {/* Glass menu card */}
+          <div className="glass-card" style={{
+            width: '100%', maxWidth: '400px',
+            padding: '6px', display: 'flex', flexDirection: 'column',
+          }}>
+            {MENU.map(item => <MenuItem key={item.href} item={item} />)}
+          </div>
 
+          {/* Stats */}
+          <div style={{
+            display: 'flex', gap: '32px', marginTop: '36px',
+            flexWrap: 'wrap', justifyContent: 'center',
+          }}>
+            {[
+              { label: 'Network',  value: 'Solana Devnet'   },
+              { label: 'Protocol', value: 'On-chain Escrow' },
+              { label: 'Fee',      value: '0.5%'            },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ textAlign: 'center' }}>
+                <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.85rem' }}>{value}</div>
+                <div style={{ color: '#334155', fontSize: '0.68rem', marginTop: '2px' }}>{label}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── Status bar ── */}
-      <div
-        className="shrink-0 px-4 py-2 border-t"
-        style={{
-          color: GREEN_DIM,
-          borderColor: '#0d260d',
-          fontFamily: MONO,
-          fontSize: '0.7rem',
-          letterSpacing: '0.03em',
-        }}
-      >
-        {'>'} connected to devnet&nbsp;&nbsp;|&nbsp;&nbsp;program: {PROGRAM_SHORT}&nbsp;&nbsp;|&nbsp;&nbsp;block:{' '}
-        {slot !== null
-          ? slot.toLocaleString()
-          : <span style={{ color: GREEN_DIM }}>syncing...</span>}
+      {/* Status bar */}
+      <div style={{
+        flexShrink: 0, padding: '9px 24px',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        position: 'relative', zIndex: 2, flexWrap: 'wrap', gap: '6px',
+      }}>
+        <span style={{ color: '#475569', fontSize: '0.68rem', fontFamily: 'monospace' }}>
+          {PROGRAM_SHORT}
+        </span>
+        <span style={{ color: '#475569', fontSize: '0.68rem' }}>
+          block {slot !== null ? slot.toLocaleString() : '…'}
+        </span>
       </div>
     </div>
   )

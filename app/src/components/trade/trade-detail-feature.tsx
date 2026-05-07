@@ -18,12 +18,6 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { SAFE_P2P_ESCROW_PROGRAM_ID, USDT_DECIMALS, USDT_MINT } from '@/lib/constants'
 
-const GREEN     = '#00cc33'
-const GREEN_DIM = '#006622'
-const RED       = '#cc3300'
-const YELLOW    = '#ccaa00'
-const MONO      = "'Courier New', monospace"
-
 const ADMIN_PUBKEY = new PublicKey('8k31uKgoxe8Kg1dgeXLevAaj1X7ck6Y26rbXosiXBGGE')
 const NULL_PUBKEY  = '11111111111111111111111111111111'
 const TRADE_DISC   = [46, 97, 187, 111, 38, 69, 11, 236]
@@ -47,6 +41,18 @@ function readU64LE(data: Uint8Array, offset: number): bigint {
 
 type TradeStatus = 'Open' | 'Active' | 'Disputed' | 'Completed' | 'Cancelled'
 
+interface ClaimRow {
+  side:         string
+  claim_text:   string
+  evidence_url: string | null
+  updated_at:   string
+}
+
+interface DisputeClaims {
+  buyer:  ClaimRow | null
+  seller: ClaimRow | null
+}
+
 interface DisputeProgress {
   disputeId:      bigint
   raisedBy:       string
@@ -54,19 +60,19 @@ interface DisputeProgress {
   votesForSeller: number
   isResolved:     boolean
   raisedAt:       number
-  votedCount:     number  // how many of the 3 arbitrators have voted
+  votedCount:     number
 }
 
 interface TradeData {
-  tradeId:   bigint
-  seller:    string
-  buyer:     string
-  amount:    bigint
-  rate:      bigint
-  createdAt: number
-  joinedAt:  number
-  status:    TradeStatus
-  vaultLocked?: bigint  // fetched separately
+  tradeId:      bigint
+  seller:       string
+  buyer:        string
+  amount:       bigint
+  rate:         bigint
+  createdAt:    number
+  joinedAt:     number
+  status:       TradeStatus
+  vaultLocked?: bigint
 }
 
 // ── PDA helpers ───────────────────────────────────────────────────────────────
@@ -100,11 +106,11 @@ const STATUS_MAP: TradeStatus[] = ['Open', 'Active', 'Disputed', 'Completed', 'C
 async function fetchTrade(connection: Connection, tradeId: bigint): Promise<TradeData> {
   const [pda] = tradePDA(tradeId)
   const info  = await connection.getAccountInfo(pda)
-  if (!info) throw new Error(`TRADE #${tradeId} NOT FOUND`)
+  if (!info) throw new Error(`Trade #${tradeId} not found`)
 
   const d = info.data as Buffer
   for (let i = 0; i < 8; i++) {
-    if (d[i] !== TRADE_DISC[i]) throw new Error('INVALID ACCOUNT DATA')
+    if (d[i] !== TRADE_DISC[i]) throw new Error('Invalid account data')
   }
 
   const trade: TradeData = {
@@ -118,7 +124,6 @@ async function fetchTrade(connection: Connection, tradeId: bigint): Promise<Trad
     status:    STATUS_MAP[d[112]] ?? 'Open',
   }
 
-  // Fetch vault balance (SPL token account: bytes 64–71 = amount u64 LE)
   try {
     const [vaultKey] = vaultPDA(tradeId)
     const vaultInfo  = await connection.getAccountInfo(vaultKey)
@@ -137,10 +142,6 @@ async function fetchDisputeCounter(connection: Connection): Promise<bigint> {
   return readU64LE(info.data, 48)
 }
 
-// DisputeAccount layout (164 bytes):
-//   8 disc | 8 dispute_id | 8 trade_id | 32 raised_by |
-//   1 votes_for_buyer | 1 votes_for_seller | 1 is_resolved |
-//   8 created_at | 96 voters[3] | 1 bump
 async function fetchDisputeForTrade(connection: Connection, tradeId: bigint): Promise<DisputeProgress | null> {
   const accounts = await connection.getProgramAccounts(SAFE_P2P_ESCROW_PROGRAM_ID, {
     filters: [{ dataSize: 164 }],
@@ -270,49 +271,37 @@ function canCancelActive(joinedAt: number) {
   return joinedAt > 0 && Date.now() / 1000 - joinedAt >= 30 * 60
 }
 
-// ── Status color ──────────────────────────────────────────────────────────────
+// ── Status badge ──────────────────────────────────────────────────────────────
 
-function statusColor(s: TradeStatus): string {
-  return { Open: GREEN, Active: YELLOW, Disputed: RED, Completed: GREEN_DIM, Cancelled: GREEN_DIM }[s]
-}
-
-// ── Shell ─────────────────────────────────────────────────────────────────────
-
-function Shell({ children }: { children: React.ReactNode }) {
+function StatusBadge({ status }: { status: TradeStatus }) {
+  const styles: Record<TradeStatus, React.CSSProperties> = {
+    Open:      { background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)' },
+    Active:    { background: 'rgba(245,158,11,0.12)',  color: '#f59e0b', border: '1px solid rgba(245,158,11,0.25)' },
+    Disputed:  { background: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)' },
+    Completed: { background: 'rgba(96,165,250,0.12)',  color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' },
+    Cancelled: { background: 'rgba(100,116,139,0.12)', color: '#64748b', border: '1px solid rgba(100,116,139,0.2)' },
+  }
   return (
-    <div className="terminal-page fixed inset-0 z-50 flex flex-col overflow-auto"
-      style={{ background: '#000', fontFamily: MONO }}>
-      {children}
-      <div className="shrink-0 px-4 py-2 border-t"
-        style={{ color: GREEN_DIM, borderColor: '#0d260d', fontSize: '0.7rem', letterSpacing: '0.03em' }}>
-        {'>'} safe p2p escrow&nbsp;&nbsp;|&nbsp;&nbsp;devnet&nbsp;&nbsp;|&nbsp;&nbsp;trade detail
-      </div>
-    </div>
+    <span style={{
+      ...styles[status],
+      fontSize: '0.72rem', fontWeight: 600, letterSpacing: '0.06em',
+      padding: '3px 10px', borderRadius: 6,
+    }}>
+      {status.toUpperCase()}
+    </span>
   )
 }
 
-// ── Row helper ────────────────────────────────────────────────────────────────
+// ── Spinner ───────────────────────────────────────────────────────────────────
 
-function Row({ label, value, valueColor = GREEN, small = false }: {
-  label: string; value: string; valueColor?: string; small?: boolean
-}) {
+function Spinner({ color = '#a855f7' }: { color?: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-      padding: '4px 0', fontSize: small ? '0.72rem' : '0.8rem', letterSpacing: '0.03em' }}>
-      <span style={{ color: GREEN_DIM }}>{label}</span>
-      <span style={{ color: valueColor, fontSize: small ? '0.68rem' : undefined }}>{value}</span>
-    </div>
-  )
-}
-
-// ── Section header ────────────────────────────────────────────────────────────
-
-function Section({ title }: { title: string }) {
-  return (
-    <div style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.12em',
-      borderTop: `1px solid ${GREEN_DIM}`, paddingTop: '12px', marginTop: '16px', marginBottom: '8px' }}>
-      ── {title} {'─'.repeat(Math.max(0, 38 - title.length))}
-    </div>
+    <span style={{
+      width: 14, height: 14, borderRadius: '50%',
+      border: `2px solid ${color}30`, borderTopColor: color,
+      display: 'inline-block', animation: 'spin 0.8s linear infinite',
+      flexShrink: 0,
+    }} />
   )
 }
 
@@ -322,34 +311,33 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
   const { connection }                 = useConnection()
   const { publicKey, sendTransaction } = useWallet()
 
-  const [trade, setTrade]             = useState<TradeData | null>(null)
+  const [trade, setTrade]                     = useState<TradeData | null>(null)
   const [disputeProgress, setDisputeProgress] = useState<DisputeProgress | null>(null)
-  const [payInfo, setPayInfo]         = useState<{ method: string; account: string; name: string } | null>(null)
-  const [loading, setLoading]         = useState(true)
-  const [acting, setActing]           = useState<string | null>(null)
-  const [errorMsg, setErrorMsg]       = useState('')
-  const [successMsg, setSuccessMsg]   = useState('')
-  const [txSig, setTxSig]             = useState('')
-  const [, setTick]                   = useState(0)
+  const [payInfo, setPayInfo]                 = useState<{ method: string; account: string; name: string } | null>(null)
+  const [loading, setLoading]                 = useState(true)
+  const [acting, setActing]                   = useState<string | null>(null)
+  const [errorMsg, setErrorMsg]               = useState('')
+  const [successMsg, setSuccessMsg]           = useState('')
+  const [txSig, setTxSig]                     = useState('')
+  const [, setTick]                           = useState(0)
 
-  // Parse trade ID
+  // Dispute evidence claims
+  const [disputeClaims, setDisputeClaims]   = useState<DisputeClaims | null>(null)
+  const [myClaimText, setMyClaimText]       = useState('')
+  const [myEvidenceUrl, setMyEvidenceUrl]   = useState('')
+  const [claimSaving, setClaimSaving]       = useState(false)
+  const [claimSavedMsg, setClaimSavedMsg]   = useState('')
+
   let tradeId: bigint
   try { tradeId = BigInt(tradeIdStr) }
   catch { tradeId = 0n }
 
-  // Countdown re-render
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 10_000)
     return () => clearInterval(id)
   }, [])
 
-  // Auto-poll every 10s when buyer is waiting for seller confirmation
   const wallet = publicKey?.toBase58() ?? ''
-  useEffect(() => {
-    if (!trade || trade.status !== 'Active' || trade.buyer !== wallet || !wallet) return
-    const id = setInterval(() => load(), 10_000)
-    return () => clearInterval(id)
-  }, [trade?.status, trade?.buyer, wallet, load])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -363,12 +351,35 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
       } else {
         setDisputeProgress(null)
       }
-      // Fetch payment info (non-critical — don't throw if it fails)
       try {
         const [tPda] = tradePDA(tradeId)
         const res = await fetch(`/api/trade-info?pda=${tPda.toBase58()}`)
         setPayInfo(res.ok ? await res.json() : null)
       } catch { setPayInfo(null) }
+
+      // Fetch dispute claims (only available when Disputed + authorized wallet)
+      try {
+        const [tPda] = tradePDA(tradeId)
+        const w = publicKey?.toBase58() ?? ''
+        if (t.status === 'Disputed' && w) {
+          const cr = await fetch(`/api/dispute-claim?trade_pda=${tPda.toBase58()}&wallet=${w}`)
+          if (cr.ok) {
+            const data = await cr.json() as DisputeClaims
+            setDisputeClaims(data)
+            // Pre-fill textarea with existing claim if we have one
+            const mySide = t.seller === w ? 'seller' : t.buyer === w ? 'buyer' : null
+            if (mySide) {
+              const mine = mySide === 'buyer' ? data.buyer : data.seller
+              if (mine) {
+                setMyClaimText(mine.claim_text)
+                setMyEvidenceUrl(mine.evidence_url ?? '')
+              }
+            }
+          }
+        } else {
+          setDisputeClaims(null)
+        }
+      } catch { setDisputeClaims(null) }
     } catch (e: unknown) {
       setErrorMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -378,14 +389,19 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
 
   useEffect(() => { load() }, [load])
 
-  // ── Generic action wrapper
+  useEffect(() => {
+    if (!trade || trade.status !== 'Active' || trade.buyer !== wallet || !wallet) return
+    const id = setInterval(() => load(), 10_000)
+    return () => clearInterval(id)
+  }, [trade?.status, trade?.buyer, wallet, load])
+
   async function withAction(key: string, fn: () => Promise<void>) {
     setActing(key)
     setErrorMsg('')
     setSuccessMsg('')
     try {
       await fn()
-      setSuccessMsg('TRANSACTION CONFIRMED')
+      setSuccessMsg('Transaction confirmed')
       await load()
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e)
@@ -395,7 +411,6 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
     }
   }
 
-  // ── Confirm Payment
   async function handleConfirm() {
     if (!publicKey || !trade) return
     await withAction('confirm', async () => {
@@ -404,19 +419,16 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
       const usdtMint       = new PublicKey(USDT_MINT)
       const buyerPk        = new PublicKey(trade.buyer)
       const buyerAta       = getAssociatedTokenAddressSync(usdtMint, buyerPk)
-
       const tx = new Transaction()
       const ataInfo = await connection.getAccountInfo(buyerAta)
       if (!ataInfo) tx.add(createAssociatedTokenAccountInstruction(publicKey, buyerAta, buyerPk, usdtMint))
       tx.add(buildConfirmIx(tradeId, tradeAccount, vault, publicKey, buyerAta))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
     })
   }
 
-  // ── Cancel Trade
   async function handleCancel() {
     if (!publicKey || !trade) return
     await withAction('cancel', async () => {
@@ -426,23 +438,20 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
       const usdtMint       = new PublicKey(USDT_MINT)
       const sellerAta      = getAssociatedTokenAddressSync(usdtMint, new PublicKey(trade.seller))
       const adminAta       = getAssociatedTokenAddressSync(usdtMint, ADMIN_PUBKEY)
-
       const tx = new Transaction()
       const adminAtaInfo = await connection.getAccountInfo(adminAta)
       if (!adminAtaInfo) tx.add(createAssociatedTokenAccountInstruction(publicKey, adminAta, ADMIN_PUBKEY, usdtMint))
       tx.add(buildCancelIx(tradeId, escrowState, tradeAccount, vault, publicKey, sellerAta, adminAta))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
     })
   }
 
-  // ── Resolve Dispute (anyone can call once votes are sufficient)
   async function handleResolve() {
     if (!publicKey || !trade || !disputeProgress) return
     await withAction('resolve', async () => {
-      const usdtMint   = new PublicKey(USDT_MINT)
+      const usdtMint         = new PublicKey(USDT_MINT)
       const [escrowState]    = escrowStatePDA()
       const [disputeAcc]     = disputePDA(disputeProgress.disputeId)
       const [tradeAcc]       = tradePDA(tradeId)
@@ -450,7 +459,6 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
       const [arbVault]       = arbVaultPDA()
       const buyerAta         = getAssociatedTokenAddressSync(usdtMint, new PublicKey(trade.buyer))
       const sellerAta        = getAssociatedTokenAddressSync(usdtMint, new PublicKey(trade.seller))
-
       const tx = new Transaction()
       tx.add(buildResolveIx(
         disputeProgress.disputeId,
@@ -463,7 +471,6 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
     })
   }
 
-  // ── Raise Dispute
   async function handleDispute() {
     if (!publicKey || !trade) return
     await withAction('dispute', async () => {
@@ -471,18 +478,48 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
       const [tradeAccount]   = tradePDA(tradeId)
       const disputeCounter   = await fetchDisputeCounter(connection)
       const [disputeAccount] = disputePDA(disputeCounter)
-
       const tx = new Transaction()
       tx.add(buildDisputeIx(tradeId, escrowState, tradeAccount, disputeAccount, publicKey))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
     })
   }
 
-  // ── Derived
-  const wallet   = publicKey?.toBase58() ?? ''
+  // ── Save dispute claim (off-chain)
+  async function handleSaveClaim(side: 'buyer' | 'seller') {
+    if (!publicKey || !trade) return
+    setClaimSaving(true)
+    setClaimSavedMsg('')
+    try {
+      const [tPda] = tradePDA(tradeId)
+      const res = await fetch('/api/dispute-claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trade_pda:    tPda.toBase58(),
+          side,
+          wallet:       publicKey.toBase58(),
+          claim_text:   myClaimText,
+          evidence_url: myEvidenceUrl || null,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Save failed')
+      }
+      setClaimSavedMsg('Claim saved')
+      // Refresh claims
+      const cr = await fetch(`/api/dispute-claim?trade_pda=${tPda.toBase58()}&wallet=${publicKey.toBase58()}`)
+      if (cr.ok) setDisputeClaims(await cr.json())
+    } catch (e: unknown) {
+      setClaimSavedMsg(e instanceof Error ? e.message : 'Error saving')
+    } finally {
+      setClaimSaving(false)
+    }
+  }
+
+  // ── Derived state
   const isSeller = trade?.seller === wallet
   const isBuyer  = trade?.buyer  === wallet && trade?.buyer !== NULL_PUBKEY
   const role     = isSeller ? 'SELLER' : isBuyer ? 'BUYER' : null
@@ -497,321 +534,582 @@ export function TradeDetailFeature({ tradeId: tradeIdStr }: { tradeId: string })
     !disputeProgress.isResolved &&
     disputeProgress.votesForBuyer !== disputeProgress.votesForSeller &&
     (disputeProgress.votedCount === 3 || Date.now() / 1000 >= disputeProgress.raisedAt + 86400)
-  const countdown  = trade?.status === 'Active' && trade.joinedAt && !canCancelActive(trade.joinedAt)
+  const countdown = trade?.status === 'Active' && trade.joinedAt && !canCancelActive(trade.joinedAt)
     ? cancelCountdown(trade.joinedAt)
     : ''
 
   // ── Render
   return (
-    <Shell>
-      {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 shrink-0">
-        <Link href="/my-trades"
-          style={{ color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.08em', textDecoration: 'none' }}>
-          {'<'} MY TRADES
-        </Link>
+    <div className="defi-page">
+
+      {/* Top bar */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 24px', flexShrink: 0, zIndex: 2,
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Link href="/my-trades" style={{
+            color: '#475569', fontSize: '0.82rem', textDecoration: 'none',
+          }}>
+            ← My Trades
+          </Link>
+          <span style={{ color: 'rgba(255,255,255,0.1)' }}>|</span>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.88rem' }}>
+            Trade #{String(tradeId).padStart(5, '0')}
+          </span>
+          {role && (
+            <span style={{
+              fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+              background: role === 'SELLER' ? 'rgba(124,58,237,0.15)' : 'rgba(16,185,129,0.1)',
+              color:      role === 'SELLER' ? '#a78bfa'               : '#34d399',
+              border:     role === 'SELLER' ? '1px solid rgba(124,58,237,0.3)' : '1px solid rgba(16,185,129,0.25)',
+            }}>
+              {role}
+            </span>
+          )}
+        </div>
         <WalletButton />
       </div>
 
       {/* Body */}
-      <div className="flex-1 px-4 pb-8" style={{ maxWidth: '520px', margin: '0 auto', width: '100%' }}>
+      <div className="defi-body">
+        <div style={{ maxWidth: 520, margin: '0 auto', padding: '24px 20px 60px', width: '100%' }}>
 
-        {/* Title */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: GREEN, fontSize: 'clamp(1rem, 3vw, 1.2rem)', letterSpacing: '0.15em' }}>
-            {'>'} TRADE #{tradeId.toString().padStart(7, '0')}
-          </div>
-          {role && (
-            <div style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.08em', marginTop: '4px' }}>
-              your role: <span style={{ color: GREEN }}>{role}</span>
+          {/* Loading */}
+          {loading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', padding: '32px 0' }}>
+              <Spinner />
+              Loading trade…
             </div>
           )}
-        </div>
 
-        {/* Loading */}
-        {loading && (
-          <div style={{ color: GREEN, fontSize: '0.85rem', letterSpacing: '0.06em' }}>
-            {'>'} LOADING<span className="terminal-cursor"> _</span>
-          </div>
-        )}
-
-        {/* Error */}
-        {errorMsg && !loading && (
-          <div style={{ border: `1px solid ${RED}`, padding: '12px', color: RED,
-            fontSize: '0.78rem', wordBreak: 'break-word', letterSpacing: '0.02em', marginBottom: '14px' }}>
-            {errorMsg}
-          </div>
-        )}
-
-        {/* Success */}
-        {successMsg && (
-          <div style={{ border: `1px solid ${GREEN}`, padding: '10px 14px', color: GREEN,
-            fontSize: '0.78rem', letterSpacing: '0.05em', marginBottom: '14px' }}>
-            {'>'} {successMsg}
-            {txSig && (
-              <a href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
-                target="_blank" rel="noopener noreferrer"
-                style={{ display: 'block', marginTop: '6px', color: GREEN_DIM, fontSize: '0.65rem', letterSpacing: '0.04em', textDecoration: 'underline' }}>
-                {'>'} view on Solana Explorer ↗
-              </a>
-            )}
-          </div>
-        )}
-
-        {trade && !loading && (
-          <>
-            {/* Status */}
-            <div style={{ display: 'inline-block', border: `1px solid ${statusColor(trade.status)}`,
-              color: statusColor(trade.status), padding: '3px 12px', fontSize: '0.78rem',
-              letterSpacing: '0.12em', marginBottom: '4px' }}>
-              {trade.status.toUpperCase()}
+          {/* Error */}
+          {errorMsg && !loading && (
+            <div className="defi-alert-error" style={{ padding: '14px 16px', marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 4 }}>⚠ Error</div>
+              <div style={{ fontSize: '0.75rem', wordBreak: 'break-word' }}>{errorMsg}</div>
             </div>
+          )}
 
-            {/* Trade details */}
-            <Section title="TRADE DETAILS" />
-            <Row label="AMOUNT"       value={`${fmt(trade.amount)} USDT`} />
-            <Row label="RATE"         value={`${trade.rate.toString()} PKR / USDT`} />
-            <Row label="BUYER PAYS"
-              value={`${(Number(trade.amount) / 10**USDT_DECIMALS * Number(trade.rate)).toLocaleString()} PKR`} />
-            {trade.vaultLocked !== undefined && (
-              <Row label="LOCKED IN VAULT" value={`${fmt(trade.vaultLocked)} USDT`} valueColor={YELLOW} />
-            )}
+          {/* Success */}
+          {successMsg && (
+            <div className="defi-alert-success" style={{ padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>✓ {successMsg}</div>
+              {txSig && (
+                <a
+                  href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ display: 'block', marginTop: 6, fontSize: '0.72rem', color: '#34d399', textDecoration: 'underline' }}
+                >
+                  View on Solana Explorer ↗
+                </a>
+              )}
+            </div>
+          )}
 
-            {/* Parties */}
-            <Section title="PARTIES" />
-            <Row
-              label="SELLER"
-              value={`${trade.seller.slice(0, 8)}…${trade.seller.slice(-8)}${isSeller ? '  [YOU]' : ''}`}
-              valueColor={isSeller ? '#00ff41' : GREEN}
-              small
-            />
-            {trade.buyer !== NULL_PUBKEY ? (
-              <Row
-                label="BUYER"
-                value={`${trade.buyer.slice(0, 8)}…${trade.buyer.slice(-8)}${isBuyer ? '  [YOU]' : ''}`}
-                valueColor={isBuyer ? '#00ff41' : GREEN}
-                small
-              />
-            ) : (
-              <Row label="BUYER" value="AWAITING BUYER…" valueColor={GREEN_DIM} />
-            )}
-
-            {/* Payment details — shown to buyer once trade is Active */}
-            {trade.status === 'Active' && isBuyer && (
-              <>
-                <Section title="SEND PAYMENT TO SELLER" />
-                {payInfo ? (
-                  <div style={{
-                    border: `1px solid ${GREEN}`,
-                    padding: '14px 16px',
-                    background: 'rgba(0,204,51,0.04)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
+          {trade && !loading && (
+            <>
+              {/* Status */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                <StatusBadge status={trade.status} />
+                {trade.vaultLocked !== undefined && (
+                  <span style={{
+                    fontSize: '0.72rem', color: '#f59e0b',
+                    background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)',
+                    borderRadius: 6, padding: '2px 8px',
                   }}>
-                    <Row label="SEND VIA"   value={payInfo.method}  valueColor="#00ff41" />
-                    <Row label="TO ACCOUNT" value={payInfo.account} valueColor="#00ff41" />
-                    {payInfo.name && <Row label="ACCOUNT NAME" value={payInfo.name} valueColor="#00ff41" />}
-                    <Row
-                      label="EXACT AMOUNT"
-                      value={`${(Number(trade.amount) / 10 ** USDT_DECIMALS * Number(trade.rate)).toLocaleString()} PKR`}
-                      valueColor={YELLOW}
-                    />
-                    <div style={{ marginTop: '6px', color: GREEN_DIM, fontSize: '0.65rem', letterSpacing: '0.03em', lineHeight: 1.7 }}>
-                      {'>'} send the exact PKR amount above to the account shown.<br />
-                      {'>'} once sent, wait for the seller to confirm receipt on-chain.<br />
-                      {'>'} if seller does not confirm, you can raise a dispute.
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ color: GREEN_DIM, fontSize: '0.75rem', letterSpacing: '0.04em' }}>
-                    {'>'} contact seller directly — payment info not on file.
-                  </div>
+                    🔒 {fmt(trade.vaultLocked)} USDT locked
+                  </span>
                 )}
-              </>
-            )}
-
-            {/* Buyer waiting indicator */}
-            {trade.status === 'Active' && isBuyer && (
-              <div style={{ marginTop: '14px', color: YELLOW, fontSize: '0.75rem', letterSpacing: '0.04em' }}>
-                {'>'} waiting for seller to confirm PKR receipt<span className="terminal-cursor"> _</span>
-                <div style={{ color: GREEN_DIM, fontSize: '0.65rem', marginTop: '4px' }}>
-                  auto-refreshing every 10s
-                </div>
               </div>
-            )}
 
-            {/* Timeline */}
-            <Section title="TIMELINE" />
-            <Row label="CREATED" value={timeAgo(trade.createdAt)} />
-            {trade.joinedAt > 0 && (
-              <Row label="JOINED" value={timeAgo(trade.joinedAt)} />
-            )}
-            {trade.status === 'Active' && countdown && (
-              <Row label="CANCEL AVAILABLE IN" value={countdown} valueColor={YELLOW} />
-            )}
-            {trade.status === 'Active' && !countdown && (isSeller || isBuyer) && (
-              <Row label="CANCEL AVAILABLE" value="NOW" valueColor={GREEN} />
-            )}
-
-            {/* Actions */}
-            {(canConfirm || canCancel || canDispute) && (
-              <>
-                <Section title="ACTIONS" />
-
-                {acting ? (
-                  <div style={{ color: YELLOW, fontSize: '0.8rem', letterSpacing: '0.05em', marginTop: '8px' }}>
-                    {'>'} PROCESSING… APPROVE IN WALLET<span className="terminal-cursor"> _</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '8px' }}>
-
-                    {canConfirm && (
-                      <button onClick={handleConfirm}
-                        className="terminal-menu-btn w-full py-3 text-center"
-                        style={{ border: `1px solid ${GREEN}`, color: GREEN, background: 'transparent',
-                          fontFamily: MONO, fontSize: '0.85rem', letterSpacing: '0.1em', cursor: 'pointer' }}>
-                        [ CONFIRM PAYMENT ]
-                      </button>
-                    )}
-
-                    {canConfirm && (
-                      <div style={{ color: GREEN_DIM, fontSize: '0.65rem', letterSpacing: '0.03em', lineHeight: 1.6 }}>
-                        {'>'} only click this after you have RECEIVED the PKR from the buyer.<br />
-                        {'>'} this releases USDT to the buyer. it cannot be undone.
-                      </div>
-                    )}
-
-                    {canDispute && (
-                      <button onClick={handleDispute}
-                        className="terminal-menu-btn w-full py-3 text-center"
-                        style={{ border: `1px solid ${RED}`, color: RED, background: 'transparent',
-                          fontFamily: MONO, fontSize: '0.85rem', letterSpacing: '0.1em', cursor: 'pointer' }}>
-                        [ RAISE DISPUTE ]
-                      </button>
-                    )}
-
-                    {canDispute && (
-                      <div style={{ color: GREEN_DIM, fontSize: '0.65rem', letterSpacing: '0.03em', lineHeight: 1.6 }}>
-                        {'>'} only raise a dispute if you sent PKR and the seller is not confirming.<br />
-                        {'>'} arbitrators will review and vote. 2/3 majority decides.
-                      </div>
-                    )}
-
-                    {canCancel && (
-                      <button onClick={handleCancel}
-                        className="terminal-menu-btn w-full py-3 text-center"
-                        style={{ border: `1px solid ${RED}`, color: RED, background: 'transparent',
-                          fontFamily: MONO, fontSize: '0.85rem', letterSpacing: '0.1em', cursor: 'pointer' }}>
-                        [ CANCEL TRADE ]
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* Terminal states */}
-            {(trade.status === 'Completed' || trade.status === 'Cancelled') && (
-              <>
-                <Section title="STATUS" />
-                <div style={{ color: statusColor(trade.status), fontSize: '0.8rem', letterSpacing: '0.05em', lineHeight: 1.8 }}>
-                  {trade.status === 'Completed' && '> TRADE COMPLETE — USDT HAS BEEN RELEASED TO BUYER'}
-                  {trade.status === 'Cancelled' && '> TRADE CANCELLED — FUNDS RETURNED TO SELLER'}
+              {/* Trade details */}
+              <div className="glass-card" style={{ padding: '16px 20px', marginBottom: 16 }}>
+                <div style={{ color: '#475569', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 12 }}>
+                  TRADE DETAILS
                 </div>
-              </>
-            )}
 
-            {/* Dispute progress panel */}
-            {trade.status === 'Disputed' && (
-              <>
-                <Section title="DISPUTE IN PROGRESS" />
-                {disputeProgress ? (
-                  <>
-                    <Row label="DISPUTE ID" value={`#${disputeProgress.disputeId.toString().padStart(7, '0')}`} />
-                    <Row
-                      label="RAISED BY"
-                      value={`${disputeProgress.raisedBy.slice(0, 8)}…${disputeProgress.raisedBy.slice(-8)}${disputeProgress.raisedBy === trade.buyer ? '  [BUYER]' : ''}`}
-                      small
-                    />
-                    <Row label="RAISED" value={timeAgo(disputeProgress.raisedAt)} />
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+                    {(Number(trade.amount) / 10 ** USDT_DECIMALS).toFixed(2)}{' '}
+                    <span style={{ fontSize: '0.9rem', color: '#64748b', fontWeight: 500 }}>USDT</span>
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: '#475569', marginTop: 4 }}>
+                    ≈ {(Number(trade.amount) / 10 ** USDT_DECIMALS * Number(trade.rate)).toLocaleString()} PKR
+                  </div>
+                </div>
 
-                    <div style={{ marginTop: '14px', marginBottom: '6px' }}>
-                      <div style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.1em', marginBottom: '10px' }}>
-                        ── ARBITRATOR VOTES ({disputeProgress.votedCount} / 3 voted) ───
-                      </div>
-
-                      {/* FOR BUYER bar */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                        <span style={{ color: GREEN_DIM, fontSize: '0.7rem', letterSpacing: '0.06em', minWidth: '90px' }}>FOR BUYER</span>
-                        <span style={{ color: GREEN, fontSize: '0.85rem', letterSpacing: '0.05em' }}>
-                          {'█'.repeat(disputeProgress.votesForBuyer)}{'░'.repeat(3 - disputeProgress.votesForBuyer)}
-                        </span>
-                        <span style={{ color: disputeProgress.votesForBuyer > 0 ? GREEN : GREEN_DIM, fontSize: '0.78rem' }}>
-                          {disputeProgress.votesForBuyer} / 3
-                        </span>
-                      </div>
-
-                      {/* FOR SELLER bar */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <span style={{ color: GREEN_DIM, fontSize: '0.7rem', letterSpacing: '0.06em', minWidth: '90px' }}>FOR SELLER</span>
-                        <span style={{ color: RED, fontSize: '0.85rem', letterSpacing: '0.05em' }}>
-                          {'█'.repeat(disputeProgress.votesForSeller)}{'░'.repeat(3 - disputeProgress.votesForSeller)}
-                        </span>
-                        <span style={{ color: disputeProgress.votesForSeller > 0 ? RED : GREEN_DIM, fontSize: '0.78rem' }}>
-                          {disputeProgress.votesForSeller} / 3
-                        </span>
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: '10px', color: GREEN_DIM, fontSize: '0.7rem', letterSpacing: '0.03em', lineHeight: 1.8 }}>
-                      {'>'} 2 of 3 votes needed to resolve — funds release automatically on majority.
-                    </div>
-
-                    {canResolve && (
-                      <div style={{ marginTop: '14px' }}>
-                        {acting === 'resolve' ? (
-                          <div style={{ color: YELLOW, fontSize: '0.8rem', letterSpacing: '0.05em' }}>
-                            {'>'} RELEASING FUNDS… APPROVE IN WALLET<span className="terminal-cursor"> _</span>
-                          </div>
-                        ) : (
-                          <>
-                            <button
-                              onClick={handleResolve}
-                              className="terminal-menu-btn w-full py-3 text-center"
-                              style={{ border: `1px solid ${GREEN}`, color: GREEN, background: 'transparent',
-                                fontFamily: MONO, fontSize: '0.85rem', letterSpacing: '0.1em', cursor: 'pointer' }}
-                            >
-                              [ RELEASE FUNDS ]
-                            </button>
-                            <div style={{ marginTop: '6px', color: GREEN_DIM, fontSize: '0.65rem', letterSpacing: '0.03em' }}>
-                              {'>'} majority vote reached — anyone can trigger the release.
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ color: RED, fontSize: '0.8rem', letterSpacing: '0.05em', lineHeight: 1.8 }}>
-                    {'>'} DISPUTE RAISED — AWAITING ARBITRATOR VOTES
+                <div className="defi-row">
+                  <span style={{ color: '#64748b' }}>Rate</span>
+                  <span style={{ color: '#cbd5e1' }}>{trade.rate.toString()} PKR/USDT</span>
+                </div>
+                <div className="defi-row">
+                  <span style={{ color: '#64748b' }}>Created</span>
+                  <span style={{ color: '#94a3b8' }}>{timeAgo(trade.createdAt)}</span>
+                </div>
+                {trade.joinedAt > 0 && (
+                  <div className="defi-row">
+                    <span style={{ color: '#64748b' }}>Joined</span>
+                    <span style={{ color: '#94a3b8' }}>{timeAgo(trade.joinedAt)}</span>
                   </div>
                 )}
-              </>
-            )}
+                {countdown && (
+                  <div className="defi-row">
+                    <span style={{ color: '#64748b' }}>Cancel unlocks in</span>
+                    <span style={{ color: '#f59e0b' }}>{countdown}</span>
+                  </div>
+                )}
+              </div>
 
-            {/* Refresh */}
-            <div style={{ marginTop: '24px' }}>
-              <button onClick={load}
-                className="terminal-menu-btn"
-                style={{ border: `1px solid ${GREEN_DIM}`, color: GREEN_DIM, background: 'transparent',
-                  fontFamily: MONO, fontSize: '0.72rem', letterSpacing: '0.08em', padding: '5px 14px' }}>
-                [ REFRESH ]
+              {/* Parties */}
+              <div className="glass-card" style={{ padding: '16px 20px', marginBottom: 16 }}>
+                <div style={{ color: '#475569', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 12 }}>
+                  PARTIES
+                </div>
+                <div className="defi-row">
+                  <span style={{ color: '#64748b' }}>Seller</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: isSeller ? '#a78bfa' : '#94a3b8' }}>
+                    {trade.seller.slice(0, 8)}…{trade.seller.slice(-8)}
+                    {isSeller && <span style={{ color: '#a78bfa', fontSize: '0.65rem', marginLeft: 6 }}>YOU</span>}
+                  </span>
+                </div>
+                {trade.buyer !== NULL_PUBKEY ? (
+                  <div className="defi-row">
+                    <span style={{ color: '#64748b' }}>Buyer</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: '0.78rem', color: isBuyer ? '#34d399' : '#94a3b8' }}>
+                      {trade.buyer.slice(0, 8)}…{trade.buyer.slice(-8)}
+                      {isBuyer && <span style={{ color: '#34d399', fontSize: '0.65rem', marginLeft: 6 }}>YOU</span>}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="defi-row">
+                    <span style={{ color: '#64748b' }}>Buyer</span>
+                    <span style={{ color: '#334155', fontStyle: 'italic', fontSize: '0.8rem' }}>Awaiting buyer…</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Payment info — buyer only, Active */}
+              {trade.status === 'Active' && isBuyer && (
+                <div style={{
+                  background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.2)',
+                  borderRadius: 12, padding: '16px 20px', marginBottom: 16,
+                }}>
+                  <div style={{ color: '#10b981', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 14 }}>
+                    SEND PAYMENT TO SELLER
+                  </div>
+                  {payInfo ? (
+                    <>
+                      <div className="defi-row">
+                        <span style={{ color: '#64748b' }}>Send via</span>
+                        <span style={{ color: '#34d399', fontWeight: 600 }}>{payInfo.method}</span>
+                      </div>
+                      <div className="defi-row">
+                        <span style={{ color: '#64748b' }}>Account</span>
+                        <span style={{ color: '#34d399', fontFamily: 'monospace', fontSize: '0.82rem' }}>{payInfo.account}</span>
+                      </div>
+                      {payInfo.name && (
+                        <div className="defi-row">
+                          <span style={{ color: '#64748b' }}>Name</span>
+                          <span style={{ color: '#34d399' }}>{payInfo.name}</span>
+                        </div>
+                      )}
+                      <div className="defi-row">
+                        <span style={{ color: '#64748b' }}>Exact amount</span>
+                        <span style={{ color: '#f59e0b', fontWeight: 700, fontSize: '0.95rem' }}>
+                          {(Number(trade.amount) / 10 ** USDT_DECIMALS * Number(trade.rate)).toLocaleString()} PKR
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(16,185,129,0.06)', borderRadius: 8, fontSize: '0.72rem', color: '#475569', lineHeight: 1.7 }}>
+                        Send the exact PKR amount above. Once sent, wait for the seller to confirm on-chain. If seller does not confirm, raise a dispute.
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ color: '#475569', fontSize: '0.8rem' }}>
+                      Contact seller directly — payment info not on file.
+                    </div>
+                  )}
+
+                  {/* Buyer waiting */}
+                  <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, color: '#f59e0b', fontSize: '0.8rem' }}>
+                    <Spinner color="#f59e0b" />
+                    Waiting for seller to confirm receipt · auto-refreshing
+                  </div>
+                </div>
+              )}
+
+              {/* Actions */}
+              {(canConfirm || canCancel || canDispute) && (
+                <div className="glass-card" style={{ padding: '16px 20px', marginBottom: 16 }}>
+                  <div style={{ color: '#475569', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 14 }}>
+                    ACTIONS
+                  </div>
+
+                  {acting ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f59e0b', fontSize: '0.85rem' }}>
+                      <Spinner color="#f59e0b" />
+                      Processing — approve in wallet…
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {canConfirm && (
+                        <>
+                          <button
+                            className="btn-gradient"
+                            onClick={handleConfirm}
+                            style={{ fontSize: '0.88rem', padding: '11px', border: 'none', cursor: 'pointer', width: '100%' }}
+                          >
+                            Confirm Payment — Release USDT to Buyer
+                          </button>
+                          <div style={{ fontSize: '0.72rem', color: '#475569', lineHeight: 1.6 }}>
+                            Only click after you have received the PKR from the buyer. This releases USDT and cannot be undone.
+                          </div>
+                        </>
+                      )}
+
+                      {canDispute && (
+                        <>
+                          <button
+                            onClick={handleDispute}
+                            style={{
+                              fontSize: '0.85rem', padding: '10px', borderRadius: 10, cursor: 'pointer', width: '100%',
+                              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+                              color: '#f87171', fontWeight: 600,
+                            }}
+                          >
+                            Raise Dispute
+                          </button>
+                          <div style={{ fontSize: '0.72rem', color: '#475569', lineHeight: 1.6 }}>
+                            Only if you sent PKR and the seller is not confirming. Arbitrators (2/3 vote) will decide.
+                          </div>
+                        </>
+                      )}
+
+                      {canCancel && (
+                        <button
+                          onClick={handleCancel}
+                          style={{
+                            fontSize: '0.85rem', padding: '10px', borderRadius: 10, cursor: 'pointer', width: '100%',
+                            background: 'rgba(100,116,139,0.08)', border: '1px solid rgba(100,116,139,0.25)',
+                            color: '#94a3b8', fontWeight: 600,
+                          }}
+                        >
+                          Cancel Trade
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Terminal states */}
+              {(trade.status === 'Completed' || trade.status === 'Cancelled') && (
+                <div className="glass-card" style={{ padding: '16px 20px', marginBottom: 16, textAlign: 'center' }}>
+                  {trade.status === 'Completed' && (
+                    <>
+                      <div style={{ fontSize: '2rem', marginBottom: 8 }}>✅</div>
+                      <div style={{ color: '#10b981', fontWeight: 600 }}>Trade Complete</div>
+                      <div style={{ color: '#475569', fontSize: '0.8rem', marginTop: 4 }}>USDT has been released to the buyer</div>
+                    </>
+                  )}
+                  {trade.status === 'Cancelled' && (
+                    <>
+                      <div style={{ fontSize: '2rem', marginBottom: 8 }}>🚫</div>
+                      <div style={{ color: '#64748b', fontWeight: 600 }}>Trade Cancelled</div>
+                      <div style={{ color: '#475569', fontSize: '0.8rem', marginTop: 4 }}>Funds returned to seller</div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Dispute panel */}
+              {trade.status === 'Disputed' && (
+                <div className="glass-card" style={{ padding: '16px 20px', marginBottom: 16 }}>
+                  <div style={{ color: '#ef4444', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 14 }}>
+                    DISPUTE IN PROGRESS
+                  </div>
+
+                  {disputeProgress ? (
+                    <>
+                      <div className="defi-row">
+                        <span style={{ color: '#64748b' }}>Dispute ID</span>
+                        <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                          #{String(disputeProgress.disputeId).padStart(5, '0')}
+                        </span>
+                      </div>
+                      <div className="defi-row">
+                        <span style={{ color: '#64748b' }}>Raised by</span>
+                        <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                          {disputeProgress.raisedBy.slice(0, 6)}…{disputeProgress.raisedBy.slice(-6)}
+                          {disputeProgress.raisedBy === trade.buyer && (
+                            <span style={{ color: '#34d399', fontSize: '0.65rem', marginLeft: 6 }}>BUYER</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="defi-row">
+                        <span style={{ color: '#64748b' }}>Raised</span>
+                        <span style={{ color: '#94a3b8' }}>{timeAgo(disputeProgress.raisedAt)}</span>
+                      </div>
+
+                      {/* Vote bars */}
+                      <div style={{ marginTop: 16 }}>
+                        <div style={{ color: '#475569', fontSize: '0.68rem', letterSpacing: '0.08em', marginBottom: 12 }}>
+                          ARBITRATOR VOTES ({disputeProgress.votedCount}/3 voted)
+                        </div>
+
+                        {/* Buyer votes */}
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Buyer wins</span>
+                            <span style={{ color: '#10b981', fontSize: '0.75rem', fontWeight: 600 }}>
+                              {disputeProgress.votesForBuyer}/3
+                            </span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%', borderRadius: 3,
+                              width: `${(disputeProgress.votesForBuyer / 3) * 100}%`,
+                              background: 'linear-gradient(90deg, #10b981, #34d399)',
+                              transition: 'width 0.4s ease',
+                            }} />
+                          </div>
+                        </div>
+
+                        {/* Seller votes */}
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Seller wins</span>
+                            <span style={{ color: '#ef4444', fontSize: '0.75rem', fontWeight: 600 }}>
+                              {disputeProgress.votesForSeller}/3
+                            </span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%', borderRadius: 3,
+                              width: `${(disputeProgress.votesForSeller / 3) * 100}%`,
+                              background: 'linear-gradient(90deg, #ef4444, #f87171)',
+                              transition: 'width 0.4s ease',
+                            }} />
+                          </div>
+                        </div>
+
+                        <div style={{ marginTop: 10, color: '#334155', fontSize: '0.7rem' }}>
+                          2/3 votes needed to resolve
+                        </div>
+                      </div>
+
+                      {/* Dispute claims */}
+                      {disputeClaims !== null && (() => {
+                        const wallet = publicKey?.toBase58() ?? ''
+                        const mySide = trade.seller === wallet ? 'seller' : trade.buyer === wallet ? 'buyer' : null
+                        return (
+                          <div style={{ marginTop: 20 }}>
+                            <div style={{ color: '#475569', fontSize: '0.68rem', letterSpacing: '0.08em', marginBottom: 12 }}>
+                              DISPUTE CLAIMS
+                            </div>
+
+                            {/* My claim form */}
+                            {mySide && (
+                              <div style={{
+                                background: 'rgba(139,92,246,0.06)',
+                                border: '1px solid rgba(139,92,246,0.2)',
+                                borderRadius: 10,
+                                padding: '14px 16px',
+                                marginBottom: 12,
+                              }}>
+                                <div style={{ color: '#a78bfa', fontSize: '0.7rem', fontWeight: 600, marginBottom: 10, letterSpacing: '0.06em' }}>
+                                  YOUR CLAIM ({mySide.toUpperCase()})
+                                </div>
+                                <textarea
+                                  value={myClaimText}
+                                  onChange={e => setMyClaimText(e.target.value)}
+                                  maxLength={500}
+                                  rows={4}
+                                  placeholder="Describe your side of the dispute…"
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box',
+                                    background: 'rgba(0,0,0,0.3)',
+                                    border: '1px solid rgba(139,92,246,0.25)',
+                                    borderRadius: 7,
+                                    color: '#e2e8f0', fontSize: '0.82rem',
+                                    padding: '10px 12px', resize: 'vertical',
+                                    fontFamily: 'inherit', outline: 'none',
+                                  }}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', color: '#475569', fontSize: '0.68rem', marginTop: 4, marginBottom: 10 }}>
+                                  {myClaimText.length}/500
+                                </div>
+                                <input
+                                  type="url"
+                                  value={myEvidenceUrl}
+                                  onChange={e => setMyEvidenceUrl(e.target.value)}
+                                  placeholder="Evidence URL (screenshot, receipt link — optional)"
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box',
+                                    background: 'rgba(0,0,0,0.3)',
+                                    border: '1px solid rgba(139,92,246,0.25)',
+                                    borderRadius: 7,
+                                    color: '#e2e8f0', fontSize: '0.8rem',
+                                    padding: '9px 12px', marginBottom: 12,
+                                    fontFamily: 'inherit', outline: 'none',
+                                  }}
+                                />
+                                {claimSaving ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#a78bfa', fontSize: '0.82rem' }}>
+                                    <Spinner color="#a78bfa" /> Saving…
+                                  </div>
+                                ) : (
+                                  <button
+                                    onClick={() => handleSaveClaim(mySide)}
+                                    disabled={myClaimText.trim().length === 0}
+                                    style={{
+                                      background: myClaimText.trim().length === 0
+                                        ? 'rgba(139,92,246,0.15)'
+                                        : 'linear-gradient(135deg, #7c3aed, #4f46e5)',
+                                      color: myClaimText.trim().length === 0 ? '#475569' : '#fff',
+                                      border: 'none', borderRadius: 8,
+                                      padding: '9px 20px', fontSize: '0.82rem',
+                                      cursor: myClaimText.trim().length === 0 ? 'not-allowed' : 'pointer',
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    Save Claim
+                                  </button>
+                                )}
+                                {claimSavedMsg && (
+                                  <div style={{
+                                    marginTop: 8, fontSize: '0.78rem',
+                                    color: claimSavedMsg.toLowerCase().includes('error') || claimSavedMsg.toLowerCase().includes('fail')
+                                      ? '#ef4444' : '#34d399',
+                                  }}>
+                                    {claimSavedMsg}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Blind notice for buyer/seller */}
+                            {mySide && (
+                              <div style={{
+                                background: 'rgba(15,23,42,0.4)',
+                                border: '1px solid rgba(255,255,255,0.06)',
+                                borderRadius: 10,
+                                padding: '12px 16px',
+                                display: 'flex', alignItems: 'flex-start', gap: 10,
+                              }}>
+                                <span style={{ fontSize: '1rem', flexShrink: 0, marginTop: 1 }}>🔒</span>
+                                <div>
+                                  <div style={{ color: '#64748b', fontSize: '0.78rem', lineHeight: 1.6 }}>
+                                    The other party&apos;s claim is hidden until the dispute resolves.
+                                    This prevents either side from rewriting their story after seeing the other&apos;s.
+                                  </div>
+                                  <div style={{ color: '#334155', fontSize: '0.68rem', marginTop: 4 }}>
+                                    Arbitrators can see both claims and will vote based on the evidence submitted.
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Arbitrator-only view */}
+                            {!mySide && (
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                                {(['buyer', 'seller'] as const).map(side => {
+                                  const claim = disputeClaims[side]
+                                  return (
+                                    <div key={side} style={{
+                                      background: 'rgba(15,23,42,0.5)',
+                                      border: '1px solid rgba(255,255,255,0.07)',
+                                      borderRadius: 10,
+                                      padding: '14px 16px',
+                                    }}>
+                                      <div style={{ color: '#64748b', fontSize: '0.68rem', fontWeight: 600, marginBottom: 8, letterSpacing: '0.06em' }}>
+                                        {side.toUpperCase()}&apos;S CLAIM
+                                      </div>
+                                      {claim ? (
+                                        <>
+                                          <div style={{ color: '#cbd5e1', fontSize: '0.8rem', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                            {claim.claim_text}
+                                          </div>
+                                          {claim.evidence_url && (
+                                            <a href={claim.evidence_url} target="_blank" rel="noopener noreferrer"
+                                              style={{ display: 'inline-block', marginTop: 8, color: '#818cf8', fontSize: '0.75rem', textDecoration: 'none' }}>
+                                              View Evidence →
+                                            </a>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <div style={{ color: '#334155', fontSize: '0.78rem', fontStyle: 'italic' }}>
+                                          No claim submitted yet.
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {/* Release Funds */}
+                      {canResolve && (
+                        <div style={{ marginTop: 16 }}>
+                          {acting === 'resolve' ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f59e0b', fontSize: '0.85rem' }}>
+                              <Spinner color="#f59e0b" />
+                              Releasing funds — approve in wallet…
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                className="btn-gradient"
+                                onClick={handleResolve}
+                                style={{ fontSize: '0.88rem', padding: '11px', border: 'none', cursor: 'pointer', width: '100%' }}
+                              >
+                                Release Funds
+                              </button>
+                              <div style={{ marginTop: 8, fontSize: '0.72rem', color: '#475569' }}>
+                                Majority vote reached — anyone can trigger the release.
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ color: '#ef4444', fontSize: '0.85rem' }}>
+                      Dispute raised — awaiting arbitrator votes
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Refresh */}
+              <button
+                onClick={load}
+                style={{
+                  background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                  color: '#64748b', fontSize: '0.75rem', padding: '7px 16px',
+                  borderRadius: 8, cursor: 'pointer',
+                }}
+              >
+                Refresh ↻
               </button>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </div>
-    </Shell>
+
+      {/* Status bar */}
+      <div style={{
+        flexShrink: 0, padding: '9px 24px',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ color: '#475569', fontSize: '0.68rem', fontFamily: 'monospace' }}>SafeP2P</span>
+        <span style={{ color: '#475569', fontSize: '0.68rem' }}>devnet · trade detail</span>
+      </div>
+    </div>
   )
 }

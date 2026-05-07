@@ -17,12 +17,6 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { SAFE_P2P_ESCROW_PROGRAM_ID, USDT_DECIMALS, USDT_MINT } from '@/lib/constants'
 
-const GREEN     = '#00cc33'
-const GREEN_DIM = '#006622'
-const RED       = '#cc3300'
-const YELLOW    = '#ccaa00'
-const MONO      = "'Courier New', monospace"
-
 const TRADE_DISC = [46, 97, 187, 111, 38, 69, 11, 236]
 
 // ── Pure-JS u64 helpers ───────────────────────────────────────────────────────
@@ -46,8 +40,8 @@ interface OpenTrade {
   pda: string
   tradeId: bigint
   seller: string
-  amount: bigint   // micro USDT
-  rate: bigint     // PKR per USDT
+  amount: bigint
+  rate: bigint
   createdAt: number
 }
 
@@ -73,13 +67,12 @@ function vaultPDA(tradeId: bigint): [PublicKey, number] {
   )
 }
 
-// ── Data fetching — only OPEN trades (status byte === 0) ──────────────────────
+// ── Data fetching ─────────────────────────────────────────────────────────────
 
 function decodeOpenTrade(pda: string, data: Buffer): OpenTrade | null {
   if (data.length < 115) return null
   for (let i = 0; i < 8; i++) if (data[i] !== TRADE_DISC[i]) return null
-  if (data[112] !== 0) return null // only Open status
-
+  if (data[112] !== 0) return null
   return {
     pda,
     tradeId:   readU64LE(data, 8),
@@ -135,16 +128,16 @@ function timeAgo(unixSecs: number): string {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="terminal-page fixed inset-0 z-50 flex flex-col overflow-auto"
-      style={{ background: '#000', fontFamily: MONO }}
-    >
+    <div className="defi-page">
       {children}
-      <div
-        className="shrink-0 px-4 py-2 border-t"
-        style={{ color: GREEN_DIM, borderColor: '#0d260d', fontSize: '0.7rem', letterSpacing: '0.03em' }}
-      >
-        {'>'} safe p2p escrow&nbsp;&nbsp;|&nbsp;&nbsp;devnet&nbsp;&nbsp;|&nbsp;&nbsp;buy / browse trades
+      <div style={{
+        flexShrink: 0, padding: '8px 24px',
+        borderTop: '1px solid var(--defi-border)',
+        display: 'flex', justifyContent: 'space-between',
+        color: '#475569', fontSize: '0.65rem',
+      }}>
+        <span>safe p2p escrow · devnet</span>
+        <span>buy / browse trades</span>
       </div>
     </div>
   )
@@ -157,12 +150,12 @@ export function BrowseTradesFeature() {
   const { connection }                 = useConnection()
   const { publicKey, sendTransaction } = useWallet()
 
-  const [trades, setTrades]       = useState<OpenTrade[]>([])
+  const [trades, setTrades]         = useState<OpenTrade[]>([])
   const [payInfoMap, setPayInfoMap] = useState<Record<string, PayInfo | null>>({})
   const [marketRate, setMarketRate] = useState<number | null>(null)
-  const [loading, setLoading]     = useState(false)
-  const [joiningId, setJoiningId] = useState<string | null>(null)
-  const [errorMsg, setErrorMsg]   = useState('')
+  const [loading, setLoading]       = useState(false)
+  const [joiningId, setJoiningId]   = useState<string | null>(null)
+  const [errorMsg, setErrorMsg]     = useState('')
 
   useEffect(() => {
     fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=pkr')
@@ -186,15 +179,12 @@ export function BrowseTradesFeature() {
       open.sort((a, b) => b.createdAt - a.createdAt)
       setTrades(open)
 
-      // Fetch payment method for each trade (non-blocking per-trade)
       const map: Record<string, PayInfo | null> = {}
       await Promise.all(open.map(async t => {
         try {
           const res = await fetch(`/api/trade-info?pda=${t.pda}`)
           map[t.pda] = res.ok ? await res.json() : null
-        } catch {
-          map[t.pda] = null
-        }
+        } catch { map[t.pda] = null }
       }))
       setPayInfoMap(map)
     } catch (e: unknown) {
@@ -206,32 +196,21 @@ export function BrowseTradesFeature() {
 
   useEffect(() => { load() }, [load])
 
-  // ── Join handler
   async function handleJoin(t: OpenTrade) {
     if (!publicKey) return
     setJoiningId(t.pda)
     setErrorMsg('')
-
     try {
       const [tradeAccount] = tradePDA(t.tradeId)
       const [vault]        = vaultPDA(t.tradeId)
       const usdtMint       = new PublicKey(USDT_MINT)
       const buyerAta       = getAssociatedTokenAddressSync(usdtMint, publicKey)
-
-      const tx = new Transaction()
-
-      // Create buyer ATA if it doesn't exist yet
-      const ataInfo = await connection.getAccountInfo(buyerAta)
-      if (!ataInfo) {
-        tx.add(createAssociatedTokenAccountInstruction(publicKey, buyerAta, publicKey, usdtMint))
-      }
-
+      const tx             = new Transaction()
+      const ataInfo        = await connection.getAccountInfo(buyerAta)
+      if (!ataInfo) tx.add(createAssociatedTokenAccountInstruction(publicKey, buyerAta, publicKey, usdtMint))
       tx.add(buildJoinTradeIx(t.tradeId, tradeAccount, vault, publicKey, buyerAta))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
-
-      // Redirect to my-trades so buyer sees their active trade
       router.push('/my-trades')
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e)
@@ -240,7 +219,8 @@ export function BrowseTradesFeature() {
     }
   }
 
-  // ── Trade card
+  // ── Trade card ────────────────────────────────────────────────────────────
+
   function TradeCard({ t }: { t: OpenTrade }) {
     const wallet    = publicKey?.toBase58() ?? ''
     const isOwn     = t.seller === wallet
@@ -254,222 +234,170 @@ export function BrowseTradesFeature() {
     const pkrAmount     = (Number(t.amount) / 10 ** USDT_DECIMALS * Number(t.rate)).toLocaleString()
 
     return (
-      <div
-        style={{
-          border: `1px solid ${isOwn ? GREEN_DIM : GREEN_DIM}`,
-          padding: '16px',
-          marginBottom: '12px',
-          opacity: isJoining ? 0.6 : 1,
-          transition: 'opacity 0.2s',
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <span style={{ color: '#00ff41', fontSize: '0.85rem', letterSpacing: '0.08em' }}>
+      <div className="glass-card-sm" style={{ padding: '20px', marginBottom: '12px', opacity: isJoining ? 0.6 : 1, transition: 'opacity 0.2s' }}>
+
+        {/* Header row */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <span style={{ color: '#60a5fa', fontSize: '0.75rem', fontWeight: 600, fontFamily: 'monospace', letterSpacing: '0.05em' }}>
             #{t.tradeId.toString().padStart(7, '0')}
           </span>
-          <span style={{ color: GREEN, fontSize: '0.68rem', letterSpacing: '0.1em', border: `1px solid ${GREEN}`, padding: '1px 6px' }}>
-            OPEN
-          </span>
+          <span className="badge badge-open">Open</span>
         </div>
 
-        {/* Details grid */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '0.8rem', letterSpacing: '0.03em', marginBottom: '14px' }}>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: GREEN_DIM }}>YOU RECEIVE</span>
-            <span style={{ color: '#00ff41', fontWeight: 'bold' }}>{amountDisplay} USDT</span>
+        {/* Main amount */}
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ color: '#fff', fontSize: '1.75rem', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1 }}>
+            {amountDisplay} <span style={{ fontSize: '1rem', color: '#94a3b8', fontWeight: 500 }}>USDT</span>
           </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: GREEN_DIM }}>PKR TO SEND</span>
-            <span style={{ color: GREEN }}>{pkrAmount} PKR</span>
+          <div style={{ color: '#475569', fontSize: '0.82rem', marginTop: '5px' }}>
+            ≈ {pkrAmount} PKR to send
           </div>
+        </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: GREEN_DIM }}>YOUR FEE (0.5%)</span>
-            <span style={{ color: YELLOW }}>{feeDisplay} USDT</span>
+        {/* Details */}
+        <div style={{ borderTop: '1px solid var(--defi-border)', borderBottom: '1px solid var(--defi-border)', padding: '4px 0', marginBottom: '14px' }}>
+          <div className="defi-row">
+            <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Rate</span>
+            <span style={{ color: '#e2e8f0', fontSize: '0.82rem' }}>{t.rate.toString()} PKR / USDT</span>
           </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: GREEN_DIM }}>RATE</span>
-            <span style={{ color: GREEN }}>{t.rate.toString()} PKR / USDT</span>
+          <div className="defi-row">
+            <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Your fee (0.5%)</span>
+            <span style={{ color: '#f59e0b', fontSize: '0.82rem' }}>−{feeDisplay} USDT</span>
           </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: GREEN_DIM }}>SELLER</span>
-            <span style={{ color: GREEN, fontSize: '0.72rem' }}>
+          <div className="defi-row">
+            <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Seller</span>
+            <span style={{ color: '#64748b', fontSize: '0.74rem', fontFamily: 'monospace' }}>
               {t.seller.slice(0, 6)}…{t.seller.slice(-6)}
             </span>
           </div>
-
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: GREEN_DIM }}>POSTED</span>
-            <span style={{ color: GREEN_DIM }}>{timeAgo(t.createdAt)}</span>
+          <div className="defi-row">
+            <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Posted</span>
+            <span style={{ color: '#475569', fontSize: '0.82rem' }}>{timeAgo(t.createdAt)}</span>
           </div>
-
           {payInfo && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', paddingTop: '8px', borderTop: `1px solid ${GREEN_DIM}` }}>
-              <span style={{ color: GREEN_DIM }}>PAYMENT VIA</span>
-              <span style={{
-                color: '#00ff41', fontSize: '0.72rem', letterSpacing: '0.1em',
-                border: '1px solid #00ff41', padding: '1px 8px',
-              }}>
-                {payInfo.method.toUpperCase()}
-              </span>
+            <div className="defi-row">
+              <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Payment via</span>
+              <span className="badge badge-open" style={{ fontSize: '0.62rem' }}>{payInfo.method}</span>
             </div>
           )}
         </div>
 
-        {/* Divider */}
-        <div style={{ borderTop: `1px solid ${GREEN_DIM}`, marginBottom: '12px' }} />
-
-        {/* Off-chain reminder */}
-        <div style={{ color: GREEN_DIM, fontSize: '0.65rem', letterSpacing: '0.03em', marginBottom: '12px', lineHeight: 1.6 }}>
-          {'>'} after joining, send PKR directly to seller off-chain.<br />
-          {'>'} USDT releases when seller confirms receipt.
+        {/* Note */}
+        <div style={{ color: '#334155', fontSize: '0.72rem', lineHeight: 1.6, marginBottom: '14px' }}>
+          After joining, send PKR to the seller off-chain. USDT releases automatically when seller confirms receipt.
         </div>
 
         {/* Action */}
         {isJoining ? (
-          <div style={{ color: YELLOW, fontSize: '0.78rem', letterSpacing: '0.05em' }}>
-            {'>'} JOINING TRADE… APPROVE IN WALLET<span className="terminal-cursor"> _</span>
+          <div style={{ color: '#a78bfa', fontSize: '0.85rem', textAlign: 'center', padding: '10px' }}>
+            Joining… approve in wallet
           </div>
         ) : isOwn ? (
-          <button
-            disabled
-            style={{
-              width: '100%',
-              padding: '11px',
-              border: `1px solid ${GREEN_DIM}`,
-              color: GREEN_DIM,
-              background: 'transparent',
-              fontFamily: MONO,
-              fontSize: '0.8rem',
-              letterSpacing: '0.1em',
-              cursor: 'default',
-              textAlign: 'center',
-            }}
-          >
-            [ YOUR OWN TRADE ]
+          <button disabled className="btn-outline-defi" style={{ width: '100%', padding: '11px', opacity: 0.4 }}>
+            Your own trade
           </button>
         ) : (
           <button
             onClick={() => handleJoin(t)}
             disabled={!canJoin}
-            className={canJoin ? 'terminal-menu-btn' : ''}
-            style={{
-              width: '100%',
-              padding: '11px',
-              border: `1px solid ${canJoin ? GREEN : GREEN_DIM}`,
-              color: canJoin ? GREEN : GREEN_DIM,
-              background: 'transparent',
-              fontFamily: MONO,
-              fontSize: '0.8rem',
-              letterSpacing: '0.1em',
-              cursor: canJoin ? 'pointer' : 'default',
-              textAlign: 'center',
-            }}
+            className={canJoin ? 'btn-gradient' : 'btn-outline-defi'}
+            style={{ width: '100%', padding: '11px', fontSize: '0.9rem' }}
           >
-            [ JOIN TRADE ]
+            {publicKey ? 'Join Trade' : 'Connect wallet to join'}
           </button>
         )}
       </div>
     )
   }
 
-  // ── Render
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
     <Shell>
       {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 shrink-0">
-        <Link href="/" style={{ color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.08em', textDecoration: 'none' }}>
-          {'<'} BACK
-        </Link>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 24px', flexShrink: 0, zIndex: 2, position: 'relative',
+        borderBottom: '1px solid var(--defi-border)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <Link href="/" style={{ color: '#475569', fontSize: '0.85rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            ← Back
+          </Link>
+          <span style={{ color: '#475569' }}>|</span>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.9rem' }}>Buy USDT</span>
+        </div>
         <WalletButton />
       </div>
 
       {/* Body */}
-      <div className="flex-1 px-4 pb-8" style={{ maxWidth: '560px', margin: '0 auto', width: '100%' }}>
+      <div className="defi-body" style={{ padding: '24px' }}>
+        <div style={{ maxWidth: '560px', margin: '0 auto', width: '100%' }}>
 
-        {/* Title */}
-        <div style={{ marginBottom: '20px' }}>
-          <div style={{ color: GREEN, fontSize: 'clamp(1rem, 3vw, 1.2rem)', letterSpacing: '0.15em' }}>
-            {'>'} BUY USDT
+          {/* Market rate + subtitle */}
+          <div style={{ marginBottom: '24px' }}>
+            <p style={{ color: '#64748b', fontSize: '0.82rem', margin: '0 0 10px' }}>
+              Pick a trade · send PKR off-chain · receive USDT on-chain
+            </p>
+            {marketRate && (
+              <div className="glass-card-sm" style={{
+                padding: '10px 16px', display: 'flex',
+                justifyContent: 'space-between', alignItems: 'center',
+              }}>
+                <span style={{ color: '#64748b', fontSize: '0.78rem' }}>Live market rate</span>
+                <span style={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 600 }}>
+                  ~{marketRate.toLocaleString()} PKR / USDT
+                </span>
+              </div>
+            )}
           </div>
-          {marketRate && (
-            <div style={{
-              marginTop: '8px', padding: '6px 10px',
-              border: `1px solid ${GREEN_DIM}`, fontSize: '0.78rem',
-              letterSpacing: '0.06em', display: 'flex', justifyContent: 'space-between',
-            }}>
-              <span style={{ color: GREEN_DIM }}>live market rate</span>
-              <span style={{ color: GREEN }}>~{marketRate.toLocaleString()} PKR / USDT</span>
+
+          {/* Error */}
+          {errorMsg && (
+            <div className="defi-alert-error" style={{ marginBottom: '16px' }}>
+              {errorMsg}
+              <button
+                onClick={() => setErrorMsg('')}
+                style={{ display: 'block', marginTop: '6px', color: '#ef4444', background: 'transparent', border: 'none', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}
+              >
+                Dismiss
+              </button>
             </div>
           )}
-          <div style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.05em', marginTop: '4px' }}>
-            pick a trade, send PKR off-chain, receive USDT on-chain
-          </div>
-        </div>
 
-        {/* Wallet guard */}
-        {!publicKey && (
-          <div style={{ border: `1px solid ${GREEN_DIM}`, padding: '12px 16px', marginBottom: '16px', color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.05em' }}>
-            {'>'} CONNECT WALLET TO JOIN A TRADE<span className="terminal-cursor"> _</span>
-          </div>
-        )}
+          {/* Count row + refresh */}
+          {!loading && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ color: '#334155', fontSize: '0.78rem' }}>
+                {trades.length === 0 ? 'No open trades' : `${trades.length} open trade${trades.length !== 1 ? 's' : ''}`}
+              </span>
+              <button
+                onClick={load}
+                className="btn-outline-defi"
+                style={{ padding: '5px 14px', fontSize: '0.78rem' }}
+              >
+                ↻ Refresh
+              </button>
+            </div>
+          )}
 
-        {/* Error banner */}
-        {errorMsg && (
-          <div
-            style={{ border: `1px solid ${RED}`, padding: '10px 12px', color: RED, fontSize: '0.75rem', marginBottom: '14px', wordBreak: 'break-word', letterSpacing: '0.02em', lineHeight: 1.6 }}
-          >
-            {errorMsg}
-            <button
-              onClick={() => setErrorMsg('')}
-              style={{ display: 'block', marginTop: '6px', color: RED, background: 'transparent', border: 'none', fontFamily: MONO, fontSize: '0.68rem', cursor: 'pointer', letterSpacing: '0.05em' }}
-            >
-              [ DISMISS ]
-            </button>
-          </div>
-        )}
-
-        {/* Count + refresh row */}
-        {!loading && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-            <span style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.05em', borderBottom: `1px solid ${GREEN_DIM}`, paddingBottom: '6px', width: '100%' }}>
-              {trades.length === 0
-                ? '── NO OPEN TRADES ────────────────────────────'
-                : `── ${trades.length} OPEN TRADE${trades.length !== 1 ? 'S' : ''} ${'─'.repeat(Math.max(0, 34 - trades.length.toString().length))}`}
-            </span>
-            <button
-              onClick={load}
-              className="terminal-menu-btn"
-              style={{ flexShrink: 0, marginLeft: '10px', border: `1px solid ${GREEN_DIM}`, color: GREEN_DIM, background: 'transparent', fontFamily: MONO, fontSize: '0.68rem', letterSpacing: '0.08em', padding: '3px 10px', marginBottom: '6px' }}
-            >
-              [ ↻ ]
-            </button>
-          </div>
-        )}
-
-        {/* States */}
-        {loading ? (
-          <div style={{ color: GREEN, fontSize: '0.85rem', letterSpacing: '0.06em' }}>
-            {'>'} FETCHING OPEN TRADES<span className="terminal-cursor"> _</span>
-          </div>
-        ) : trades.length === 0 ? (
-          <div style={{ color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.04em', lineHeight: 1.8 }}>
-            {'>'} NO OPEN TRADES RIGHT NOW<br />
-            <span style={{ fontSize: '0.68rem' }}>
-              be the first —{' '}
-              <Link href="/sell" style={{ color: GREEN, textDecoration: 'underline' }}>
-                CREATE A SELL TRADE
+          {/* States */}
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '48px 0', color: '#334155', fontSize: '0.9rem' }}>
+              Loading trades…
+            </div>
+          ) : trades.length === 0 ? (
+            <div className="glass-card-sm" style={{ padding: '40px 24px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '12px' }}>📭</div>
+              <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '8px' }}>No open trades right now</div>
+              <Link href="/sell" style={{ color: '#a78bfa', fontSize: '0.82rem', textDecoration: 'none' }}>
+                Be the first — create a sell trade →
               </Link>
-            </span>
-          </div>
-        ) : (
-          trades.map(t => <TradeCard key={t.pda} t={t} />)
-        )}
+            </div>
+          ) : (
+            trades.map(t => <TradeCard key={t.pda} t={t} />)
+          )}
+        </div>
       </div>
     </Shell>
   )

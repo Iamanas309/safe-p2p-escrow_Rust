@@ -16,14 +16,8 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { SAFE_P2P_ESCROW_PROGRAM_ID, USDT_DECIMALS, USDT_MINT } from '@/lib/constants'
 
-const GREEN     = '#00cc33'
-const GREEN_DIM = '#006622'
-const RED       = '#cc3300'
-const YELLOW    = '#ccaa00'
-const MONO      = "'Courier New', monospace"
-
-const NULL_PUBKEY = '11111111111111111111111111111111'
-const STAKE_AMOUNT = 50 // USDT
+const NULL_PUBKEY  = '11111111111111111111111111111111'
+const STAKE_AMOUNT = 50
 
 // ── Pure-JS u64 helpers ───────────────────────────────────────────────────────
 
@@ -69,27 +63,23 @@ function arbVaultPDA(): [PublicKey, number] {
 
 function tradePDA(tradeId: bigint): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('trade'), u64LE(tradeId)],
-    SAFE_P2P_ESCROW_PROGRAM_ID,
+    [Buffer.from('trade'), u64LE(tradeId)], SAFE_P2P_ESCROW_PROGRAM_ID,
   )
 }
 
 function disputePDA(disputeId: bigint): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
-    [Buffer.from('dispute'), u64LE(disputeId)],
-    SAFE_P2P_ESCROW_PROGRAM_ID,
+    [Buffer.from('dispute'), u64LE(disputeId)], SAFE_P2P_ESCROW_PROGRAM_ID,
   )
 }
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
-// EscrowState layout: 8 disc | 32 admin | 8 trade_ctr | 8 dispute_ctr |
-//                     96 arbitrators[3] | 24 arb_balances[3] | ...
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function _fetchEscrowInfo(connection: any): Promise<EscrowInfo> {
   const [pda] = escrowStatePDA()
   const info  = await connection.getAccountInfo(pda)
-  if (!info) throw new Error('ESCROW NOT INITIALIZED')
+  if (!info) throw new Error('Escrow not initialized')
 
   const d = info.data as Buffer
   const arbitrators: string[] = []
@@ -103,10 +93,6 @@ async function _fetchEscrowInfo(connection: any): Promise<EscrowInfo> {
   return { arbitrators, balances }
 }
 
-// DisputeAccount layout (164 bytes):
-//   8 disc | 8 dispute_id | 8 trade_id | 32 raised_by |
-//   1 votes_for_buyer | 1 votes_for_seller | 1 is_resolved |
-//   8 created_at | 96 voters[3] | 1 bump
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchDisputes(connection: any): Promise<DisputeInfo[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -114,7 +100,7 @@ async function fetchDisputes(connection: any): Promise<DisputeInfo[]> {
     filters: [{ dataSize: 164 }],
   })
   return accounts
-    .filter(({ account }: { account: { data: Buffer } }) => account.data[58] === 0) // is_resolved === false
+    .filter(({ account }: { account: { data: Buffer } }) => account.data[58] === 0)
     .map(({ account }: { account: { data: Buffer } }) => {
       const d = account.data
       const disputeId = readU64LE(d, 8)
@@ -149,11 +135,11 @@ function buildStakeIx(
   return new TransactionInstruction({
     programId: SAFE_P2P_ESCROW_PROGRAM_ID,
     keys: [
-      { pubkey: escrowState,            isSigner: false, isWritable: true  },
-      { pubkey: candidate,              isSigner: true,  isWritable: true  },
-      { pubkey: candidateTokenAccount,  isSigner: false, isWritable: true  },
-      { pubkey: arbitratorVault,        isSigner: false, isWritable: true  },
-      { pubkey: TOKEN_PROGRAM_ID,       isSigner: false, isWritable: false },
+      { pubkey: escrowState,           isSigner: false, isWritable: true  },
+      { pubkey: candidate,             isSigner: true,  isWritable: true  },
+      { pubkey: candidateTokenAccount, isSigner: false, isWritable: true  },
+      { pubkey: arbitratorVault,       isSigner: false, isWritable: true  },
+      { pubkey: TOKEN_PROGRAM_ID,      isSigner: false, isWritable: false },
     ],
     data: Buffer.from([134, 217, 193, 186, 254, 144, 116, 236]),
   })
@@ -199,38 +185,11 @@ function buildRemoveIx(
   })
 }
 
-
-
-// ── Shell ─────────────────────────────────────────────────────────────────────
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      className="terminal-page fixed inset-0 z-50 flex flex-col overflow-auto"
-      style={{ background: '#000', fontFamily: MONO }}
-    >
-      {children}
-      <div
-        className="shrink-0 px-4 py-2 border-t"
-        style={{ color: GREEN_DIM, borderColor: '#0d260d', fontSize: '0.7rem', letterSpacing: '0.03em' }}
-      >
-        {'>'} safe p2p escrow&nbsp;&nbsp;|&nbsp;&nbsp;devnet&nbsp;&nbsp;|&nbsp;&nbsp;arbitrator panel
-      </div>
-    </div>
-  )
-}
-
 // ── Slot card ─────────────────────────────────────────────────────────────────
 
 function SlotCard({
-  slotIndex,
-  occupant,
-  balance,
-  wallet,
-  acting,
-  onStake,
-  onWithdraw,
-  onLeave,
+  slotIndex, occupant, balance, wallet, acting,
+  onStake, onWithdraw, onLeave,
 }: {
   slotIndex: number
   occupant: string
@@ -241,114 +200,112 @@ function SlotCard({
   onWithdraw: () => void
   onLeave: () => void
 }) {
-  const isEmpty  = occupant === NULL_PUBKEY
-  const isYours  = !isEmpty && occupant === wallet
-  const earned   = (Number(balance) / 10 ** USDT_DECIMALS).toFixed(6)
+  const isEmpty   = occupant === NULL_PUBKEY
+  const isYours   = !isEmpty && occupant === wallet
+  const isOther   = !isEmpty && !isYours
+  const earned    = (Number(balance) / 10 ** USDT_DECIMALS).toFixed(4)
   const hasEarned = balance > 0n
 
-  const borderColor = isYours ? GREEN : GREEN_DIM
-
   return (
-    <div
-      style={{
-        border: `1px solid ${borderColor}`,
-        padding: '16px',
-        marginBottom: '10px',
-        opacity: acting ? 0.6 : 1,
-        transition: 'opacity 0.2s',
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <span style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.12em' }}>
+    <div className="glass-card-sm" style={{
+      padding: '16px', marginBottom: 10,
+      opacity: acting ? 0.6 : 1, transition: 'opacity 0.2s',
+      borderColor: isYours ? 'rgba(124,58,237,0.35)' : isOther ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.06)',
+    }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ color: '#64748b', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.1em' }}>
           SLOT {slotIndex + 1}
         </span>
         {isEmpty ? (
-          <span style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.1em', border: `1px solid ${GREEN_DIM}`, padding: '1px 6px' }}>
-            EMPTY
-          </span>
+          <span style={{
+            fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 5,
+            background: 'rgba(16,185,129,0.1)', color: '#10b981', border: '1px solid rgba(16,185,129,0.2)',
+          }}>OPEN</span>
         ) : isYours ? (
-          <span style={{ color: GREEN, fontSize: '0.68rem', letterSpacing: '0.1em', border: `1px solid ${GREEN}`, padding: '1px 6px' }}>
-            YOU
-          </span>
+          <span style={{
+            fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 5,
+            background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '1px solid rgba(124,58,237,0.3)',
+          }}>YOU</span>
         ) : (
-          <span style={{ color: YELLOW, fontSize: '0.68rem', letterSpacing: '0.1em', border: `1px solid ${YELLOW}`, padding: '1px 6px' }}>
-            OCCUPIED
-          </span>
+          <span style={{
+            fontSize: '0.65rem', fontWeight: 600, padding: '2px 8px', borderRadius: 5,
+            background: 'rgba(245,158,11,0.1)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.2)',
+          }}>OCCUPIED</span>
         )}
       </div>
 
+      {/* Info */}
       {!isEmpty && (
-        <div style={{ marginBottom: '8px', fontSize: '0.75rem', letterSpacing: '0.03em' }}>
-          <span style={{ color: GREEN_DIM }}>ARBITRATOR&nbsp;&nbsp;</span>
-          <span style={{ color: isYours ? '#00ff41' : GREEN, fontSize: '0.7rem' }}>
-            {occupant.slice(0, 8)}…{occupant.slice(-8)}
-          </span>
-        </div>
-      )}
-
-      {!isEmpty && (
-        <div style={{ marginBottom: '12px', fontSize: '0.75rem', letterSpacing: '0.03em' }}>
-          <span style={{ color: GREEN_DIM }}>EARNINGS&nbsp;&nbsp;&nbsp;&nbsp;</span>
-          <span style={{ color: hasEarned ? '#00ff41' : GREEN_DIM }}>
-            {earned} USDT
-          </span>
-        </div>
-      )}
-
-      {acting && (
-        <div style={{ color: YELLOW, fontSize: '0.75rem', letterSpacing: '0.05em', marginBottom: '8px' }}>
-          {'>'} processing…<span className="terminal-cursor"> _</span>
-        </div>
-      )}
-
-      {!acting && (
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {isEmpty && wallet && (
-            <button
-              onClick={onStake}
-              className="terminal-menu-btn"
-              style={{
-                border: `1px solid ${GREEN}`, color: GREEN, background: 'transparent',
-                fontFamily: MONO, fontSize: '0.75rem', letterSpacing: '0.08em', padding: '6px 14px', cursor: 'pointer',
-              }}
-            >
-              [ STAKE {STAKE_AMOUNT} USDT ]
-            </button>
-          )}
-
-          {isYours && hasEarned && (
-            <button
-              onClick={onWithdraw}
-              className="terminal-menu-btn"
-              style={{
-                border: `1px solid ${GREEN}`, color: GREEN, background: 'transparent',
-                fontFamily: MONO, fontSize: '0.75rem', letterSpacing: '0.08em', padding: '6px 14px', cursor: 'pointer',
-              }}
-            >
-              [ WITHDRAW ]
-            </button>
-          )}
-
-          {isYours && (
-            <button
-              onClick={onLeave}
-              className="terminal-menu-btn"
-              style={{
-                border: `1px solid ${RED}`, color: RED, background: 'transparent',
-                fontFamily: MONO, fontSize: '0.75rem', letterSpacing: '0.08em', padding: '6px 14px', cursor: 'pointer',
-              }}
-            >
-              [ LEAVE SLOT ]
-            </button>
-          )}
-
-          {isEmpty && !wallet && (
-            <span style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.04em' }}>
-              connect wallet to stake
+        <>
+          <div className="defi-row">
+            <span style={{ color: '#64748b' }}>Arbitrator</span>
+            <span style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: isYours ? '#c4b5fd' : '#94a3b8' }}>
+              {occupant.slice(0, 8)}…{occupant.slice(-8)}
             </span>
-          )}
-        </div>
+          </div>
+          <div className="defi-row">
+            <span style={{ color: '#64748b' }}>Earned</span>
+            <span style={{ color: hasEarned ? '#10b981' : '#334155', fontWeight: hasEarned ? 600 : 400 }}>
+              {earned} USDT
+            </span>
+          </div>
+        </>
       )}
+
+      {/* Actions */}
+      <div style={{ marginTop: isEmpty ? 0 : 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {acting && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#f59e0b', fontSize: '0.8rem' }}>
+            <span style={{
+              width: 13, height: 13, borderRadius: '50%',
+              border: '2px solid rgba(245,158,11,0.3)', borderTopColor: '#f59e0b',
+              display: 'inline-block', animation: 'spin 0.8s linear infinite',
+            }} />
+            Processing…
+          </div>
+        )}
+
+        {!acting && isEmpty && wallet && (
+          <button
+            className="btn-gradient"
+            onClick={onStake}
+            style={{ fontSize: '0.82rem', padding: '7px 16px', border: 'none', cursor: 'pointer' }}
+          >
+            Stake {STAKE_AMOUNT} USDT → Claim Slot
+          </button>
+        )}
+
+        {!acting && isEmpty && !wallet && (
+          <span style={{ color: '#334155', fontSize: '0.75rem' }}>Connect wallet to stake</span>
+        )}
+
+        {!acting && isYours && hasEarned && (
+          <button
+            onClick={onWithdraw}
+            style={{
+              fontSize: '0.82rem', padding: '7px 14px', borderRadius: 8, cursor: 'pointer',
+              background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)',
+              color: '#10b981', fontWeight: 600,
+            }}
+          >
+            Withdraw Earnings
+          </button>
+        )}
+
+        {!acting && isYours && (
+          <button
+            onClick={onLeave}
+            style={{
+              fontSize: '0.82rem', padding: '7px 14px', borderRadius: 8, cursor: 'pointer',
+              background: 'rgba(100,116,139,0.06)', border: '1px solid rgba(100,116,139,0.2)',
+              color: '#64748b', fontWeight: 600,
+            }}
+          >
+            Leave Slot
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -402,220 +359,236 @@ export function ArbitratorFeature() {
     }
   }
 
-  // ── Stake
   async function handleStake(slotIndex: number) {
     if (!publicKey) return
     await withAction(slotIndex, async () => {
       const [escrowState]     = escrowStatePDA()
       const [arbitratorVault] = arbVaultPDA()
-      const usdtMint           = new PublicKey(USDT_MINT)
-      const candidateAta       = getAssociatedTokenAddressSync(usdtMint, publicKey)
-
+      const usdtMint          = new PublicKey(USDT_MINT)
+      const candidateAta      = getAssociatedTokenAddressSync(usdtMint, publicKey)
       const tx = new Transaction()
       const ataInfo = await connection.getAccountInfo(candidateAta)
-      if (!ataInfo) {
-        tx.add(createAssociatedTokenAccountInstruction(publicKey, candidateAta, publicKey, usdtMint))
-      }
+      if (!ataInfo) tx.add(createAssociatedTokenAccountInstruction(publicKey, candidateAta, publicKey, usdtMint))
       tx.add(buildStakeIx(publicKey, candidateAta, escrowState, arbitratorVault))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
-      setSuccessMsg(`SLOT ${slotIndex + 1} CLAIMED — you are now an arbitrator`)
+      setSuccessMsg(`Slot ${slotIndex + 1} claimed — you are now an arbitrator`)
     })
   }
 
-  // ── Withdraw
   async function handleWithdraw(slotIndex: number) {
     if (!publicKey) return
     await withAction(slotIndex, async () => {
       const [escrowState]     = escrowStatePDA()
       const [arbitratorVault] = arbVaultPDA()
-      const usdtMint           = new PublicKey(USDT_MINT)
-      const arbitratorAta      = getAssociatedTokenAddressSync(usdtMint, publicKey)
-
+      const arbitratorAta     = getAssociatedTokenAddressSync(new PublicKey(USDT_MINT), publicKey)
       const tx = new Transaction()
       tx.add(buildWithdrawIx(publicKey, arbitratorAta, escrowState, arbitratorVault))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
-      setSuccessMsg('EARNINGS WITHDRAWN TO YOUR WALLET')
+      setSuccessMsg('Earnings withdrawn to your wallet')
     })
   }
 
-  // ── Leave
   async function handleLeave(slotIndex: number) {
     if (!publicKey) return
     await withAction(slotIndex, async () => {
       const [escrowState]     = escrowStatePDA()
       const [arbitratorVault] = arbVaultPDA()
-      const usdtMint           = new PublicKey(USDT_MINT)
-      const arbitratorAta      = getAssociatedTokenAddressSync(usdtMint, publicKey)
-
+      const arbitratorAta     = getAssociatedTokenAddressSync(new PublicKey(USDT_MINT), publicKey)
       const tx = new Transaction()
       tx.add(buildRemoveIx(publicKey, arbitratorAta, publicKey, escrowState, arbitratorVault))
-
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
       setTxSig(sig)
-      setSuccessMsg(`SLOT ${slotIndex + 1} FREED — stake returned to your wallet`)
+      setSuccessMsg(`Slot ${slotIndex + 1} freed — stake returned to your wallet`)
     })
   }
 
-  const wallet        = publicKey?.toBase58() ?? ''
-  const slotsCount    = info?.arbitrators.filter(a => a !== NULL_PUBKEY).length ?? 0
-  const yourSlot      = info?.arbitrators.findIndex(a => a === wallet) ?? -1
-  const isArbitrator  = yourSlot >= 0
-  const pendingVotes  = disputes.filter(d => wallet && !d.voters.includes(wallet))
+  const wallet       = publicKey?.toBase58() ?? ''
+  const slotsCount   = info?.arbitrators.filter(a => a !== NULL_PUBKEY).length ?? 0
+  const yourSlot     = info?.arbitrators.findIndex(a => a === wallet) ?? -1
+  const isArbitrator = yourSlot >= 0
+  const pendingVotes = disputes.filter(d => wallet && !d.voters.includes(wallet))
 
   return (
-    <Shell>
-      {/* Header */}
-      <div className="flex justify-between items-center px-6 py-4 shrink-0">
-        <Link href="/" style={{ color: GREEN_DIM, fontSize: '0.8rem', letterSpacing: '0.08em', textDecoration: 'none' }}>
-          {'<'} BACK
-        </Link>
+    <div className="defi-page">
+
+      {/* Top bar */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '16px 24px', flexShrink: 0, zIndex: 2,
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Link href="/" style={{ color: '#475569', fontSize: '0.82rem', textDecoration: 'none' }}>
+            ← Back
+          </Link>
+          <span style={{ color: 'rgba(255,255,255,0.1)' }}>|</span>
+          <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.88rem' }}>Become Arbitrator</span>
+        </div>
         <WalletButton />
       </div>
 
       {/* Body */}
-      <div className="flex-1 px-4 pb-8" style={{ maxWidth: '520px', margin: '0 auto', width: '100%' }}>
+      <div className="defi-body">
+        <div style={{ maxWidth: 520, margin: '0 auto', padding: '24px 20px 60px', width: '100%' }}>
 
-        {/* Title */}
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ color: GREEN, fontSize: 'clamp(1rem, 3vw, 1.2rem)', letterSpacing: '0.15em' }}>
-            {'>'} BECOME ARBITRATOR
-          </div>
-          <div style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.05em', marginTop: '4px' }}>
-            stake {STAKE_AMOUNT} USDT to secure the network — earn dispute fees
-          </div>
-        </div>
-
-        {/* Arbitrator status banner */}
-        {isArbitrator && (
-          <div style={{ border: `1px solid ${GREEN}`, padding: '10px 14px', marginBottom: '18px', color: GREEN, fontSize: '0.78rem', letterSpacing: '0.05em' }}>
-            {'>'} YOU ARE ARBITRATOR — SLOT {yourSlot + 1}
-            {pendingVotes.length > 0 && (
-              <>
-                <br />
-                <span style={{ color: YELLOW, fontSize: '0.68rem' }}>
-                  {pendingVotes.length} dispute{pendingVotes.length > 1 ? 's' : ''} waiting for your vote ↓
-                </span>
-              </>
-            )}
-            {pendingVotes.length === 0 && (
-              <>
-                <br />
-                <span style={{ color: GREEN_DIM, fontSize: '0.68rem' }}>
-                  no pending disputes — all clear
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Success banner */}
-        {successMsg && (
-          <div style={{ border: `1px solid ${GREEN}`, padding: '10px 14px', marginBottom: '14px', color: GREEN, fontSize: '0.78rem', letterSpacing: '0.05em' }}>
-            {'>'} {successMsg}
-            {txSig && (
-              <a
-                href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
-                target="_blank" rel="noopener noreferrer"
-                style={{ display: 'block', marginTop: '6px', color: GREEN_DIM, fontSize: '0.65rem', textDecoration: 'underline' }}
-              >
-                {'>'} view on Solana Explorer ↗
-              </a>
-            )}
-          </div>
-        )}
-
-        {/* Error banner */}
-        {errorMsg && (
-          <div style={{ border: `1px solid ${RED}`, padding: '10px 14px', color: RED, fontSize: '0.75rem', marginBottom: '14px', wordBreak: 'break-word', letterSpacing: '0.02em' }}>
-            {errorMsg}
-          </div>
-        )}
-
-        {/* Slots header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <span style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.1em' }}>
-            ── ARBITRATOR SLOTS ({slotsCount}/3 FILLED) ──────────
-          </span>
-          <button
-            onClick={load}
-            className="terminal-menu-btn"
-            style={{ border: `1px solid ${GREEN_DIM}`, color: GREEN_DIM, background: 'transparent', fontFamily: MONO, fontSize: '0.68rem', letterSpacing: '0.08em', padding: '3px 10px' }}
-          >
-            [ ↻ ]
-          </button>
-        </div>
-
-        {/* Slot cards */}
-        {loading ? (
-          <div style={{ color: GREEN, fontSize: '0.85rem', letterSpacing: '0.06em' }}>
-            {'>'} LOADING<span className="terminal-cursor"> _</span>
-          </div>
-        ) : info ? (
-          info.arbitrators.map((occupant, i) => (
-            <SlotCard
-              key={i}
-              slotIndex={i}
-              occupant={occupant}
-              balance={info.balances[i]}
-              wallet={wallet}
-              acting={actingSlot === i}
-              onStake={() => handleStake(i)}
-              onWithdraw={() => handleWithdraw(i)}
-              onLeave={() => handleLeave(i)}
-            />
-          ))
-        ) : null}
-
-        {/* ── Dispute panel link ── */}
-        {isArbitrator && !loading && (
-          <div style={{ marginTop: '28px', borderTop: `1px solid ${GREEN_DIM}`, paddingTop: '16px' }}>
-            <div style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.1em', marginBottom: '10px' }}>
-              ── VOTE ON DISPUTES ─────────────────────────
+          {/* Hero tagline */}
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ color: '#94a3b8', fontSize: '0.85rem', lineHeight: 1.6 }}>
+              Stake {STAKE_AMOUNT} USDT · secure the network · earn dispute fees
             </div>
-            <div style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.03em', lineHeight: 1.8, marginBottom: '12px' }}>
-              {pendingVotes.length > 0
-                ? <span style={{ color: YELLOW }}>{'>'} {pendingVotes.length} dispute{pendingVotes.length > 1 ? 's' : ''} waiting for your vote</span>
-                : <span>{'>'} no active disputes — all clear</span>
-              }
-            </div>
-            <Link href="/arbitrate" style={{ textDecoration: 'none' }}>
-              <button
-                className="terminal-menu-btn"
-                style={{ border: `1px solid ${GREEN}`, color: GREEN, background: 'transparent',
-                  fontFamily: MONO, fontSize: '0.75rem', letterSpacing: '0.08em', padding: '7px 16px', cursor: 'pointer' }}
-              >
-                [ GO TO DISPUTE PANEL → ]
-              </button>
-            </Link>
           </div>
-        )}
 
-        {/* How it works */}
-        <div style={{ marginTop: '28px', borderTop: `1px solid ${GREEN_DIM}`, paddingTop: '16px' }}>
-          <div style={{ color: GREEN_DIM, fontSize: '0.68rem', letterSpacing: '0.1em', marginBottom: '10px' }}>
-            ── HOW IT WORKS ─────────────────────────────
-          </div>
-          {[
-            `stake ${STAKE_AMOUNT} USDT to claim an empty slot`,
-            'when a trade is disputed, vote BUYER WON or SELLER WON',
-            '2/3 majority wins — 1% of trade goes to voting arbitrators',
-            'withdraw earnings anytime while keeping your slot',
-            `leave at any time — your ${STAKE_AMOUNT} USDT stake is returned`,
-          ].map((line, i) => (
-            <div key={i} style={{ color: GREEN_DIM, fontSize: '0.72rem', letterSpacing: '0.03em', lineHeight: 1.8 }}>
-              {'>'} {line}
+          {/* Arbitrator status banner */}
+          {isArbitrator && (
+            <div style={{
+              background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)',
+              borderRadius: 10, padding: '12px 16px', marginBottom: 20,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ color: '#a78bfa', fontWeight: 600, fontSize: '0.88rem' }}>
+                  ⚖ You are Arbitrator · Slot {yourSlot + 1}
+                </div>
+                <div style={{ color: '#64748b', fontSize: '0.75rem', marginTop: 3 }}>
+                  {pendingVotes.length > 0
+                    ? `${pendingVotes.length} dispute${pendingVotes.length > 1 ? 's' : ''} waiting for your vote`
+                    : 'No pending disputes — all clear'
+                  }
+                </div>
+              </div>
+              {pendingVotes.length > 0 && (
+                <Link href="/arbitrate" style={{ textDecoration: 'none' }}>
+                  <button className="btn-gradient" style={{
+                    fontSize: '0.78rem', padding: '6px 14px', border: 'none', cursor: 'pointer', flexShrink: 0,
+                  }}>
+                    Vote Now →
+                  </button>
+                </Link>
+              )}
             </div>
-          ))}
+          )}
+
+          {/* Success */}
+          {successMsg && (
+            <div className="defi-alert-success" style={{ padding: '12px 16px', marginBottom: 14 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>✓ {successMsg}</div>
+              {txSig && (
+                <a
+                  href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ display: 'block', marginTop: 6, fontSize: '0.72rem', color: '#34d399', textDecoration: 'underline' }}
+                >
+                  View on Solana Explorer ↗
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Error */}
+          {errorMsg && (
+            <div className="defi-alert-error" style={{ padding: '12px 16px', marginBottom: 14 }}>
+              <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 4 }}>⚠ Error</div>
+              <div style={{ fontSize: '0.75rem', wordBreak: 'break-word' }}>{errorMsg}</div>
+            </div>
+          )}
+
+          {/* Slots header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ color: '#475569', fontSize: '0.8rem' }}>
+              Arbitrator Slots ({slotsCount}/3 filled)
+            </span>
+            <button
+              onClick={load}
+              style={{
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                color: '#64748b', fontSize: '0.75rem', padding: '5px 12px',
+                borderRadius: 8, cursor: 'pointer',
+              }}
+            >
+              Refresh ↻
+            </button>
+          </div>
+
+          {/* Slot cards */}
+          {loading ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', padding: '16px 0' }}>
+              <span style={{
+                width: 14, height: 14, borderRadius: '50%',
+                border: '2px solid rgba(168,85,247,0.3)', borderTopColor: '#a855f7',
+                display: 'inline-block', animation: 'spin 0.8s linear infinite',
+              }} />
+              Loading…
+            </div>
+          ) : info ? (
+            info.arbitrators.map((occupant, i) => (
+              <SlotCard
+                key={i}
+                slotIndex={i}
+                occupant={occupant}
+                balance={info.balances[i]}
+                wallet={wallet}
+                acting={actingSlot === i}
+                onStake={() => handleStake(i)}
+                onWithdraw={() => handleWithdraw(i)}
+                onLeave={() => handleLeave(i)}
+              />
+            ))
+          ) : null}
+
+          {/* Dispute panel link for arbitrators */}
+          {isArbitrator && !loading && (
+            <div style={{ marginTop: 24 }}>
+              <Link href="/arbitrate" style={{ textDecoration: 'none' }}>
+                <button
+                  style={{
+                    width: '100%', fontSize: '0.88rem', padding: '11px',
+                    borderRadius: 10, cursor: 'pointer',
+                    background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)',
+                    color: '#f59e0b', fontWeight: 600,
+                  }}
+                >
+                  ⚖ Go to Dispute Panel →
+                </button>
+              </Link>
+            </div>
+          )}
+
+          {/* How it works */}
+          <div className="glass-card" style={{ padding: '16px 20px', marginTop: 28 }}>
+            <div style={{ color: '#475569', fontSize: '0.7rem', fontWeight: 600, letterSpacing: '0.08em', marginBottom: 12 }}>
+              HOW IT WORKS
+            </div>
+            {[
+              `Stake ${STAKE_AMOUNT} USDT to claim an empty slot`,
+              'When a trade is disputed, vote Buyer Won or Seller Won',
+              '2/3 majority wins — 1% of trade value goes to voting arbitrators',
+              'Withdraw your earnings anytime while keeping your slot',
+              `Leave at any time — your ${STAKE_AMOUNT} USDT stake is returned`,
+            ].map((line, i) => (
+              <div key={i} style={{ color: '#475569', fontSize: '0.78rem', lineHeight: 1.9, display: 'flex', gap: 8 }}>
+                <span style={{ color: '#334155', flexShrink: 0 }}>→</span>
+                <span>{line}</span>
+              </div>
+            ))}
+          </div>
+
         </div>
-
       </div>
-    </Shell>
+
+      {/* Status bar */}
+      <div style={{
+        flexShrink: 0, padding: '9px 24px',
+        borderTop: '1px solid rgba(255,255,255,0.05)',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ color: '#475569', fontSize: '0.68rem', fontFamily: 'monospace' }}>SafeP2P</span>
+        <span style={{ color: '#475569', fontSize: '0.68rem' }}>devnet · arbitrator panel</span>
+      </div>
+    </div>
   )
 }
