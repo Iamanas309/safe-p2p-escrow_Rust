@@ -127,6 +127,7 @@ export function CreateTradeFeature() {
   const [errorMsg, setErrorMsg]     = useState('')
   const [faucetState, setFaucetState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [faucetError, setFaucetError] = useState('')
+  const [payInfoWarn, setPayInfoWarn] = useState('')
 
   async function handleFaucet() {
     if (!publicKey) return
@@ -201,15 +202,20 @@ export function CreateTradeFeature() {
       const sig = await sendTransaction(tx, connection)
       await connection.confirmTransaction(sig, 'confirmed')
 
-      fetch('/api/trade-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pda: tradeAccount.toBase58(), method: payMethod, account: payAccount.trim(), name: payName.trim() }),
-      }).catch(() => {})
-
       setTradeId(tradeCounter)
       setTxSig(sig)
       setPhase('success')
+
+      try {
+        const infoRes = await fetch('/api/trade-info', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pda: tradeAccount.toBase58(), method: payMethod, account: payAccount.trim(), name: payName.trim() }),
+        })
+        if (!infoRes.ok) setPayInfoWarn(`Payment info not saved (${await infoRes.text()}) — buyers won't see your account number.`)
+      } catch (e) {
+        setPayInfoWarn(`Payment info not saved (network error) — buyers won't see your account number.`)
+      }
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e)
       setErrorMsg(raw.length > 200 ? raw.slice(0, 200) + '…' : raw)
@@ -248,6 +254,12 @@ export function CreateTradeFeature() {
               <h2 style={{ color: '#fff', fontWeight: 700, fontSize: '1.3rem', margin: 0 }}>Trade Created</h2>
               <p style={{ color: '#64748b', fontSize: '0.82rem', marginTop: '6px' }}>Your USDT is locked in escrow and visible to buyers</p>
             </div>
+
+            {payInfoWarn && (
+              <div className="defi-alert-error" style={{ marginBottom: '16px', fontSize: '0.78rem' }}>
+                ⚠️ {payInfoWarn}
+              </div>
+            )}
 
             <div className="glass-card-sm" style={{ padding: '20px', marginBottom: '20px' }}>
               <div className="defi-row">
