@@ -274,12 +274,12 @@ export function BrowseTradesFeature() {
             <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Posted</span>
             <span style={{ color: '#475569', fontSize: '0.82rem' }}>{timeAgo(t.createdAt)}</span>
           </div>
-          <div className="defi-row">
-            <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Payment via</span>
-            <span className="badge badge-open" style={{ fontSize: '0.62rem' }}>
-              {payInfo?.method ?? 'EasyPaisa / JazzCash'}
-            </span>
-          </div>
+          {payInfo && (
+            <div className="defi-row">
+              <span style={{ color: 'var(--defi-text-mute)', fontSize: '0.82rem' }}>Payment via</span>
+              <span className="badge badge-open" style={{ fontSize: '0.62rem' }}>{payInfo.method}</span>
+            </div>
+          )}
         </div>
 
         {/* Note */}
